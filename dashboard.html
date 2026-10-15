@@ -1,0 +1,313 @@
+<title>Tableau de bord intérim</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f1efe9; --surface:#ffffff; --surface-2:#f8f6f1; --border:#ddd8cc;
+  --fg:#211f1a; --fg-muted:#6b6557; --accent:#c9811f; --accent-ink:#2a1a04;
+  --good:#1f7a4d; --good-bg:#e7f3ec; --bad:#b4332a; --bad-bg:#fbeae8;
+  --info:#2d5f7c; --warn:#a8631b; --warn-bg:#f8ecda; --chip-bg:#eee9da; --focus:#2d5f7c;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#17160f; --surface:#211f17; --surface-2:#272419; --border:#3a3627;
+    --fg:#efece2; --fg-muted:#a39d89; --accent:#e3a63f; --accent-ink:#1c1304;
+    --good:#5fcf94; --good-bg:#15291f; --bad:#f0897f; --bad-bg:#2c1917;
+    --info:#7fb2d4; --warn:#e3a63f; --warn-bg:#2c2415; --chip-bg:#2c2919; --focus:#7fb2d4; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#17160f; --surface:#211f17; --surface-2:#272419; --border:#3a3627;
+  --fg:#efece2; --fg-muted:#a39d89; --accent:#e3a63f; --accent-ink:#1c1304;
+  --good:#5fcf94; --good-bg:#15291f; --bad:#f0897f; --bad-bg:#2c1917;
+  --info:#7fb2d4; --warn:#e3a63f; --warn-bg:#2c2415; --chip-bg:#2c2919; --focus:#7fb2d4; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{
+  background:var(--bg); color:var(--fg); font-family:"Public Sans",system-ui,sans-serif;
+  padding-left:max(16px, env(safe-area-inset-left,0px));
+  padding-right:max(16px, env(safe-area-inset-right,0px));
+}
+h1,h2,.display{font-family:"Archivo",system-ui,sans-serif; text-wrap:balance}
+.tabular{font-variant-numeric:tabular-nums}
+.wrap{max-width:860px; margin:0 auto; padding-block:0 40px}
+
+header.top{position:sticky; top:env(safe-area-inset-top,0px); z-index:5; background:var(--bg); padding-block:14px 12px; border-bottom:1px solid var(--border)}
+.brand{display:flex; align-items:baseline; justify-content:space-between; gap:8px}
+.brand .mark{font-family:"Archivo"; font-weight:800; font-size:12px; letter-spacing:.14em; color:var(--accent)}
+.brand time{font-size:11px; color:var(--fg-muted)}
+h1{font-size:21px; font-weight:800; margin:6px 0 2px; line-height:1.15}
+.subtitle{font-size:12.5px; color:var(--fg-muted)}
+.priv-note{
+  margin-top:10px; background:var(--warn-bg); border:1px solid var(--border); border-radius:9px;
+  padding:9px 11px; font-size:12px; color:var(--warn); display:flex; gap:7px; align-items:flex-start;
+}
+.priv-note svg{flex:none; margin-top:1px}
+
+/* vue d'ensemble */
+.ov-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:9px; margin-top:16px}
+.ov-card{
+  background:var(--surface); border:1px solid var(--border); border-radius:11px; padding:12px 13px; min-width:0;
+}
+.ov-card .name{font-weight:700; font-size:13.5px; margin-bottom:7px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.ov-stats{display:flex; gap:10px}
+.ov-stats b{display:block; font-family:"Archivo"; font-size:16px; font-weight:700}
+.ov-stats span{font-size:9px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.03em}
+.ov-stats .wait b{color:var(--warn)}
+.ov-stats .ok b{color:var(--good)}
+.ov-stats .bad b{color:var(--bad)}
+.ov-card .vol{margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-size:11.5px; color:var(--fg-muted)}
+.ov-card .vol b{color:var(--fg); font-weight:700}
+
+/* tabs */
+.tabs{display:flex; gap:6px; margin-top:22px; flex-wrap:wrap}
+.tab{
+  padding:9px 14px; border-radius:8px; border:1px solid var(--border); background:var(--surface-2);
+  color:var(--fg-muted); font:600 12.5px "Public Sans"; cursor:pointer;
+}
+.tab[aria-selected="true"]{background:var(--fg); color:var(--bg); border-color:var(--fg)}
+
+/* filtres */
+.filters{display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; align-items:center}
+.filters select, .filters input{
+  font:500 13px "Public Sans"; padding:8px 10px; border-radius:8px; border:1px solid var(--border);
+  background:var(--surface); color:var(--fg);
+}
+.filters input{flex:1; min-width:140px}
+.chips{display:flex; gap:6px; flex-wrap:wrap}
+.chipbtn{
+  padding:6px 11px; border-radius:999px; border:1px solid var(--border); background:var(--surface);
+  color:var(--fg-muted); font:600 11.5px "Public Sans"; cursor:pointer;
+}
+.chipbtn[aria-pressed="true"]{background:var(--accent); color:var(--accent-ink); border-color:var(--accent)}
+.result-count{font-size:12px; color:var(--fg-muted); margin-top:10px}
+
+/* table-like rows */
+.rows{display:flex; flex-direction:column; gap:7px; margin-top:10px}
+.row{
+  background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:11px 12px;
+  display:grid; grid-template-columns:1fr auto; gap:6px 10px; min-width:0;
+}
+.row .main{min-width:0}
+.row .name{font-weight:700; font-size:14px}
+.row .meta{font-size:12px; color:var(--fg-muted); margin-top:1px; display:flex; gap:6px; flex-wrap:wrap}
+.row .meta span:not(:last-child)::after{content:"·"; margin-left:6px; color:var(--border)}
+.row .status{
+  align-self:start; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
+  padding:3px 8px; border-radius:6px; white-space:nowrap;
+}
+.status.attente{background:var(--warn-bg); color:var(--warn)}
+.status.valide{background:var(--good-bg); color:var(--good)}
+.status.refuse{background:var(--bad-bg); color:var(--bad)}
+.row .nums{grid-column:1/-1; display:flex; gap:16px; margin-top:4px; padding-top:7px; border-top:1px solid var(--border); font-size:12px; flex-wrap:wrap}
+.row .nums b{font-family:"Archivo"; font-weight:700; color:var(--fg)}
+.row .comment{grid-column:1/-1; font-size:12px; color:var(--fg-muted); font-style:italic; margin-top:2px}
+.row .echbadge{align-self:start; font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:6px; white-space:nowrap; background:var(--chip-bg); color:var(--fg-muted)}
+.row .echbadge.warn{background:var(--warn-bg); color:var(--warn)}
+.row .echbadge.bad{background:var(--bad-bg); color:var(--bad)}
+
+.empty{margin-top:18px; text-align:center; padding:30px 18px; border:1px dashed var(--border); border-radius:12px; color:var(--fg-muted); font-size:13px}
+[hidden]{display:none!important}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><span class="mark">STAM — Intérim · RH</span><time id="genTime"></time></div>
+    <h1>Tableau de bord contrats intérim</h1>
+    <div class="subtitle">Vue complète, avec montants — usage interne RH uniquement.</div>
+    <div class="priv-note">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z"/></svg>
+      Page privée (montants, salaires) : ne pas partager le lien avec les conducteurs. Eux ont leur propre page, sans ces chiffres.
+    </div>
+  </header>
+
+  <div class="ov-grid" id="ovGrid"></div>
+
+  <div class="tabs">
+    <button class="tab" id="tabItems" aria-selected="true">Contrats</button>
+    <button class="tab" id="tabEch" aria-selected="false">Échéances</button>
+  </div>
+
+  <main id="itemsView">
+    <div class="filters">
+      <select id="fConducteur"></select>
+      <input id="fSearch" type="text" placeholder="Chercher un nom, un n° de contrat, un chantier…">
+    </div>
+    <div class="chips" id="fStatus">
+      <button class="chipbtn" data-v="tous" aria-pressed="true">Tous</button>
+      <button class="chipbtn" data-v="attente" aria-pressed="false">En attente</button>
+      <button class="chipbtn" data-v="valide" aria-pressed="false">Validés</button>
+      <button class="chipbtn" data-v="refuse" aria-pressed="false">Refusés</button>
+    </div>
+    <div class="result-count" id="itemsCount"></div>
+    <div class="rows" id="itemsRows"></div>
+    <div class="empty" id="itemsEmpty" hidden>Aucun contrat ne correspond à ces filtres.</div>
+  </main>
+
+  <main id="echView" hidden>
+    <div class="filters">
+      <select id="fConducteurEch"></select>
+      <input id="fSearchEch" type="text" placeholder="Chercher un nom, un chantier…">
+    </div>
+    <div class="result-count" id="echCount"></div>
+    <div class="rows" id="echRows"></div>
+    <div class="empty" id="echEmpty" hidden>Aucune échéance ne correspond à ces filtres.</div>
+  </main>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var DATA = null;
+
+  function esc(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function num(v, unit){ if (v === null || v === undefined) return '—'; return v.toFixed(2).replace('.', ',') + (unit || ''); }
+  function euro0(v){ return Math.round(v).toLocaleString('fr-FR') + ' €'; }
+
+  function fillSelect(sel, noms){
+    sel.innerHTML = '<option value="tous">Tous les conducteurs</option>' +
+      noms.map(function(n){ return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('');
+  }
+
+  var fConducteur = document.getElementById('fConducteur');
+  var fConducteurEch = document.getElementById('fConducteurEch');
+  var fSearch = document.getElementById('fSearch');
+  var fSearchEch = document.getElementById('fSearchEch');
+  var statusFilter = 'tous';
+  document.querySelectorAll('#fStatus .chipbtn').forEach(function(b){
+    b.addEventListener('click', function(){
+      document.querySelectorAll('#fStatus .chipbtn').forEach(function(x){ x.setAttribute('aria-pressed', String(x === b)); });
+      statusFilter = b.getAttribute('data-v');
+      renderItems();
+    });
+  });
+  fConducteur.addEventListener('change', renderItems);
+  fSearch.addEventListener('input', renderItems);
+  fConducteurEch.addEventListener('change', renderEch);
+  fSearchEch.addEventListener('input', renderEch);
+
+  function matchSearch(hay, needle){
+    if (!needle) return true;
+    return hay.toLowerCase().indexOf(needle.toLowerCase()) !== -1;
+  }
+
+  function itemRowHtml(it){
+    return '<div class="row">' +
+      '<div class="main">' +
+        '<div class="name">' + esc(it.interimaire) + '</div>' +
+        '<div class="meta"><span>' + esc(it.conducteur) + '</span><span>' + esc(it.chantier || '—') + '</span><span>Contrat ' + esc(it.contrat) + '</span></div>' +
+      '</div>' +
+      '<span class="status ' + it.statut + '">' + ({attente:'En attente', valide:'Validé', refuse:'Refusé'}[it.statut]) + '</span>' +
+      '<div class="nums">' +
+        '<span>Mission <b class="tabular">' + esc(it.debutMission||'—') + ' → ' + esc(it.finFerme||'—') + '</b></span>' +
+        '<span>Salaire <b class="tabular">' + num(it.salaire) + '</b> €/h</span>' +
+        '<span>Facturé <b class="tabular">' + num(it.tarifFacture) + '</b> €/h</span>' +
+        '<span>THM 42h <b class="tabular">' + num(it.thm42) + '</b> €/h</span>' +
+        (it.valideLe ? '<span>Le <b class="tabular">' + esc(it.valideLe) + '</b></span>' : '') +
+      '</div>' +
+      (it.commentaire ? '<div class="comment">“' + esc(it.commentaire) + '”</div>' : '') +
+    '</div>';
+  }
+
+  function renderItems(){
+    var cond = fConducteur.value, q = fSearch.value.trim();
+    var filtered = DATA.items.filter(function(it){
+      if (statusFilter !== 'tous' && it.statut !== statusFilter) return false;
+      if (cond !== 'tous' && it.conducteur !== cond) return false;
+      if (q && !matchSearch([it.interimaire, it.contrat, it.chantier, it.conducteur].join(' '), q)) return false;
+      return true;
+    });
+    document.getElementById('itemsCount').textContent = filtered.length + ' contrat(s)';
+    document.getElementById('itemsRows').innerHTML = filtered.map(itemRowHtml).join('');
+    document.getElementById('itemsEmpty').hidden = filtered.length !== 0;
+  }
+
+  function echRowHtml(it){
+    var cls = it.enRetard ? 'bad' : (it.joursRestants <= 7 ? 'warn' : '');
+    var label = it.enRetard ? 'Échéance dépassée' : ('J-' + it.joursRestants);
+    return '<div class="row">' +
+      '<div class="main">' +
+        '<div class="name">' + esc(it.interimaire) + '</div>' +
+        '<div class="meta"><span>' + esc(it.conducteur) + '</span><span>' + esc(it.chantier || '—') + '</span><span>Contrat ' + esc(it.contrat) + '</span></div>' +
+      '</div>' +
+      '<span class="echbadge ' + cls + '">' + label + '</span>' +
+      '<div class="nums">' +
+        '<span>Fin ferme <b class="tabular">' + esc(it.finFerme||'—') + '</b></span>' +
+        '<span>Salaire <b class="tabular">' + num(it.salaire) + '</b> €/h</span>' +
+        '<span>Facturé <b class="tabular">' + num(it.tarifFacture) + '</b> €/h</span>' +
+        '<span>THM 42h <b class="tabular">' + num(it.thm42) + '</b> €/h</span>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderEch(){
+    var cond = fConducteurEch.value, q = fSearchEch.value.trim();
+    var filtered = DATA.echeances.filter(function(it){
+      if (cond !== 'tous' && it.conducteur !== cond) return false;
+      if (q && !matchSearch([it.interimaire, it.contrat, it.chantier, it.conducteur].join(' '), q)) return false;
+      return true;
+    });
+    document.getElementById('echCount').textContent = filtered.length + ' échéance(s)';
+    document.getElementById('echRows').innerHTML = filtered.map(echRowHtml).join('');
+    document.getElementById('echEmpty').hidden = filtered.length !== 0;
+  }
+
+  document.getElementById('tabItems').addEventListener('click', function(){
+    document.getElementById('tabItems').setAttribute('aria-selected','true');
+    document.getElementById('tabEch').setAttribute('aria-selected','false');
+    document.getElementById('itemsView').hidden = false;
+    document.getElementById('echView').hidden = true;
+  });
+  document.getElementById('tabEch').addEventListener('click', function(){
+    document.getElementById('tabItems').setAttribute('aria-selected','false');
+    document.getElementById('tabEch').setAttribute('aria-selected','true');
+    document.getElementById('itemsView').hidden = true;
+    document.getElementById('echView').hidden = false;
+  });
+
+  function boot(data){
+    DATA = data;
+    document.getElementById('genTime').textContent = "maj " + DATA.genereLe;
+
+    var volumeParConducteur = {};
+    DATA.items.forEach(function(it){
+      if (it.statut !== 'attente') return;
+      var v = (it.tarifFacture || 0) * (it.heuresSemaine || 0);
+      volumeParConducteur[it.conducteur] = (volumeParConducteur[it.conducteur] || 0) + v;
+    });
+    document.getElementById('ovGrid').innerHTML = DATA.apercu.map(function(c){
+      var vol = volumeParConducteur[c.nom] || 0;
+      return '<div class="ov-card">' +
+        '<div class="name">' + esc(c.nom) + '</div>' +
+        '<div class="ov-stats">' +
+          '<div class="wait"><b class="tabular">' + c.enAttente + '</b><span>Attente</span></div>' +
+          '<div class="ok"><b class="tabular">' + c.valides + '</b><span>Validés</span></div>' +
+          '<div class="bad"><b class="tabular">' + c.refuses + '</b><span>Refusés</span></div>' +
+        '</div>' +
+        '<div class="vol">Volume hebdo facturé (en attente) : <b>' + euro0(vol) + '</b></div>' +
+      '</div>';
+    }).join('');
+
+    var nomsConducteurs = DATA.apercu.map(function(c){ return c.nom; });
+    fillSelect(fConducteur, nomsConducteurs);
+    fillSelect(fConducteurEch, nomsConducteurs);
+
+    renderItems();
+    renderEch();
+  }
+
+  fetch('/api/dashboard.json').then(function(r){
+    if (!r.ok) throw new Error('http ' + r.status);
+    return r.json();
+  }).then(boot).catch(function(e){
+    document.querySelector('.wrap').innerHTML =
+      '<div class="empty" style="margin-top:60px">Données indisponibles pour le moment. Réessayez dans une minute.</div>';
+  });
+})();
+</script>

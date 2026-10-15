@@ -1,0 +1,610 @@
+<title>Contrats à valider</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Layout concept: mobile-first stacked card list behind a sticky conducteur
+   header and a tab switcher (A valider / Echeances / Historique). Each card
+   is a flat bordered panel: identity + chantier up top, a label/value grid,
+   a THM stat tile pulled out for scanning, and an action row that opens an
+   inline decision panel. Built for a foreman checking contracts on a phone
+   at a job site. */
+:root{
+  --bg:#f1efe9; --surface:#ffffff; --surface-2:#f8f6f1; --border:#ddd8cc;
+  --fg:#211f1a; --fg-muted:#6b6557; --accent:#c9811f; --accent-ink:#2a1a04;
+  --good:#1f7a4d; --good-bg:#e7f3ec; --bad:#b4332a; --bad-bg:#fbeae8;
+  --info:#2d5f7c; --warn:#a8631b; --warn-bg:#f8ecda; --chip-bg:#eee9da; --focus:#2d5f7c;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#17160f; --surface:#211f17; --surface-2:#272419; --border:#3a3627;
+    --fg:#efece2; --fg-muted:#a39d89; --accent:#e3a63f; --accent-ink:#1c1304;
+    --good:#5fcf94; --good-bg:#15291f; --bad:#f0897f; --bad-bg:#2c1917;
+    --info:#7fb2d4; --warn:#e3a63f; --warn-bg:#2c2415; --chip-bg:#2c2919; --focus:#7fb2d4; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#17160f; --surface:#211f17; --surface-2:#272419; --border:#3a3627;
+  --fg:#efece2; --fg-muted:#a39d89; --accent:#e3a63f; --accent-ink:#1c1304;
+  --good:#5fcf94; --good-bg:#15291f; --bad:#f0897f; --bad-bg:#2c1917;
+  --info:#7fb2d4; --warn:#e3a63f; --warn-bg:#2c2415; --chip-bg:#2c2919; --focus:#7fb2d4; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{
+  background:var(--bg); color:var(--fg); font-family:"Public Sans",system-ui,sans-serif;
+  padding-left:max(16px, env(safe-area-inset-left,0px));
+  padding-right:max(16px, env(safe-area-inset-right,0px));
+}
+h1,h2,h3,.display{font-family:"Archivo",system-ui,sans-serif; text-wrap:balance}
+.tabular{font-variant-numeric:tabular-nums}
+.wrap{max-width:640px; margin:0 auto; padding-block:0 32px}
+
+header.top{
+  position:sticky; top:env(safe-area-inset-top,0px); z-index:5;
+  background:var(--bg); padding-block:14px 10px; border-bottom:1px solid var(--border);
+}
+.brand{display:flex; align-items:baseline; justify-content:space-between; gap:8px}
+.brand .mark{font-family:"Archivo"; font-weight:800; font-size:12px; letter-spacing:.14em; color:var(--accent)}
+.brand time{font-size:11px; color:var(--fg-muted)}
+.title-row{margin-top:6px}
+h1{font-size:21px; font-weight:800; margin:0; line-height:1.15}
+.subtitle{font-size:13px; color:var(--fg-muted); margin-top:3px}
+.subtitle strong{color:var(--fg); font-weight:600}
+
+.tabs{display:flex; gap:6px; margin-top:14px}
+.tab{
+  flex:1; min-width:0; text-align:center; padding:9px 6px; border-radius:8px;
+  border:1px solid var(--border); background:var(--surface-2); color:var(--fg-muted);
+  font:600 12.5px "Public Sans"; cursor:pointer;
+}
+.tab[aria-selected="true"]{background:var(--fg); color:var(--bg); border-color:var(--fg)}
+.tab .n{font-family:"Archivo"; font-weight:700}
+
+.switcher{padding-block:18px}
+.switcher p{color:var(--fg-muted); font-size:14px; line-height:1.5}
+.switcher .note{
+  background:var(--chip-bg); border:1px solid var(--border); border-radius:10px;
+  padding:10px 12px; font-size:12.5px; color:var(--fg-muted); margin-bottom:16px;
+}
+.cond-list{display:flex; flex-direction:column; gap:8px}
+.cond-btn{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:13px 14px; border-radius:10px; border:1px solid var(--border);
+  background:var(--surface); color:var(--fg); text-align:left; cursor:pointer; font:inherit;
+}
+.cond-btn:hover{border-color:var(--accent)}
+.cond-btn .name{font-weight:600; font-size:14.5px}
+.cond-btn .count{
+  font-family:"Archivo"; font-weight:700; font-size:13px; color:var(--accent-ink);
+  background:var(--accent); border-radius:999px; padding:2px 9px; flex:none;
+}
+.ov-link{
+  display:flex; align-items:center; justify-content:center; gap:7px; width:100%;
+  margin-top:16px; padding:11px; border-radius:10px; border:1px dashed var(--border);
+  background:none; color:var(--info); font:600 13px "Public Sans"; cursor:pointer;
+}
+.ov-link:hover{border-color:var(--info)}
+
+.list{display:flex; flex-direction:column; gap:12px; padding-top:16px}
+.card{
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  padding:14px 14px 12px; min-width:0;
+}
+.card-head{display:flex; justify-content:space-between; gap:10px; align-items:flex-start}
+.who{min-width:0}
+.who .name{font-weight:700; font-size:15px; line-height:1.25}
+.who .qual{font-size:12.5px; color:var(--fg-muted); margin-top:1px}
+.chip{
+  flex:none; font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+  background:var(--chip-bg); color:var(--fg-muted); border-radius:6px; padding:3px 7px;
+}
+.chip.warn{background:var(--warn-bg); color:var(--warn)}
+.chip.bad{background:var(--bad-bg); color:var(--bad)}
+.site-row{display:flex; align-items:center; gap:6px; margin-top:8px; font-size:13px; color:var(--info)}
+.site-row svg{flex:none}
+
+.grid{
+  display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; margin-top:12px;
+  padding-top:11px; border-top:1px solid var(--border);
+}
+.cell{min-width:0}
+.cell .lbl{font-size:10.5px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.05em}
+.cell .val{font-size:13.5px; font-weight:600; margin-top:1px}
+.cell .val.muted{font-weight:400; color:var(--fg-muted)}
+
+.thm-row{display:flex; gap:8px; margin-top:12px}
+.thm{
+  flex:1; background:var(--surface-2); border:1px solid var(--border); border-radius:9px;
+  padding:8px 10px;
+}
+.thm .lbl{font-size:10px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.04em}
+.thm .val{font-family:"Archivo"; font-weight:700; font-size:17px; margin-top:1px}
+.thm .unit{font-size:11px; font-weight:500; color:var(--fg-muted)}
+
+.actions{display:flex; gap:8px; margin-top:13px; flex-wrap:wrap}
+.btn{
+  flex:1; min-width:84px; padding:10px 8px; border-radius:9px; font:600 13px "Public Sans"; cursor:pointer;
+  border:1px solid var(--border); background:var(--surface-2); color:var(--fg);
+}
+.btn.ok{border-color:var(--good); color:var(--good)}
+.btn.ok[aria-pressed="true"]{background:var(--good-bg)}
+.btn.no{border-color:var(--bad); color:var(--bad)}
+.btn.no[aria-pressed="true"]{background:var(--bad-bg)}
+.btn.wait{border-color:var(--fg-muted)}
+.btn.wait[aria-pressed="true"]{background:var(--chip-bg)}
+.btn:focus-visible{outline:2px solid var(--focus); outline-offset:2px}
+
+.panel{margin-top:11px; border-top:1px dashed var(--border); padding-top:11px}
+.panel[hidden]{display:none!important}
+.panel p{font-size:12.5px; color:var(--fg-muted); margin:0 0 8px; line-height:1.5}
+.panel textarea{
+  width:100%; min-height:52px; resize:vertical; border:1px solid var(--border); border-radius:8px;
+  padding:8px 9px; font:400 13px "Public Sans"; background:var(--surface); color:var(--fg);
+}
+.msg-box{
+  margin-top:9px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px;
+  padding:9px 10px; font-size:12.5px;
+}
+.msg-box .to{color:var(--fg-muted)}
+.msg-box .to b{color:var(--fg); font-weight:600}
+.msg-box .body{margin-top:5px; font-weight:500; white-space:pre-wrap}
+.copy-row{display:flex; gap:8px; margin-top:9px; flex-wrap:wrap}
+.copy-row button, .copy-row a{
+  font:600 12.5px "Public Sans"; padding:7px 11px; border-radius:7px; border:1px solid var(--border);
+  background:var(--surface); color:var(--fg); cursor:pointer; text-decoration:none;
+}
+.copy-row button.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent)}
+.copied{font-size:11.5px; color:var(--good); margin-left:2px; opacity:0; transition:opacity .15s}
+.copied.show{opacity:1}
+
+/* echeances : regroupe par chantier */
+.site-group{margin-top:18px}
+.site-group:first-child{margin-top:0}
+.site-group h2{font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px; margin:0 0 8px}
+.site-group h2 svg{flex:none; color:var(--info)}
+.site-group .count{font-family:"Archivo"; color:var(--fg-muted); font-weight:600}
+
+/* apercu global (vue d'ensemble, sans montants) */
+.ov-table{display:flex; flex-direction:column; gap:8px; padding-top:16px}
+.ov-row{
+  display:flex; align-items:center; gap:10px; padding:12px 13px; border:1px solid var(--border);
+  border-radius:10px; background:var(--surface);
+}
+.ov-row .name{flex:1; min-width:0; font-weight:600; font-size:14px}
+.ov-stat{text-align:center; min-width:40px}
+.ov-stat b{display:block; font-family:"Archivo"; font-size:15px; font-weight:700}
+.ov-stat span{font-size:9.5px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.04em}
+.ov-stat.wait b{color:var(--warn)}
+.ov-stat.ok b{color:var(--good)}
+.ov-stat.bad b{color:var(--bad)}
+
+.empty{
+  margin-top:20px; text-align:center; padding:34px 18px; border:1px dashed var(--border);
+  border-radius:12px; color:var(--fg-muted);
+}
+.empty .big{font-family:"Archivo"; font-weight:700; color:var(--fg); font-size:15px; margin-bottom:4px}
+.empty p{font-size:13px; line-height:1.5; max-width:38ch; margin:0 auto}
+
+.back{
+  display:inline-flex; align-items:center; gap:4px; margin-top:16px; font-size:12.5px;
+  color:var(--fg-muted); background:none; border:none; cursor:pointer; padding:4px 0; font:inherit;
+}
+.back:hover{color:var(--fg)}
+[hidden]{display:none!important}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <span class="mark">STAM — Intérim</span>
+      <time id="genTime"></time>
+    </div>
+    <div class="title-row">
+      <h1 id="pageTitle">Contrats à valider</h1>
+      <div class="subtitle" id="subtitle">Sélectionnez votre nom pour voir vos contrats.</div>
+    </div>
+    <div class="tabs" id="tabs" hidden>
+      <button class="tab" id="tabPending" role="tab" aria-selected="true">À valider <span class="n" id="countPending"></span></button>
+      <button class="tab" id="tabEcheances" role="tab" aria-selected="false">Échéances <span class="n" id="countEcheances"></span></button>
+      <button class="tab" id="tabHistory" role="tab" aria-selected="false">Historique <span class="n" id="countHistory"></span></button>
+    </div>
+  </header>
+
+  <div id="switcher" class="switcher">
+    <div class="note">Page de démonstration : en production, chaque conducteur reçoit directement son propre lien personnel par e-mail (il n'a pas besoin de choisir son nom ici).</div>
+    <p>Choisissez votre nom pour voir les contrats qui vous attendent :</p>
+    <div class="cond-list" id="condList"></div>
+    <button class="ov-link" id="ovLink">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-5 4 3 5-7"/></svg>
+      Voir l'état des lieux (tous conducteurs)
+    </button>
+  </div>
+
+  <main id="pendingView" hidden>
+    <div class="list" id="pendingList"></div>
+    <div class="empty" id="pendingEmpty" hidden>
+      <div class="big">Rien à valider</div>
+      <p>Tous les contrats de vos chantiers sont à jour.</p>
+    </div>
+  </main>
+
+  <main id="echeancesView" hidden>
+    <div id="echeancesGroups"></div>
+    <div class="empty" id="echeancesEmpty" hidden>
+      <div class="big">Aucune échéance proche</div>
+      <p>Aucun contrat de vos chantiers n'arrive à échéance dans les prochaines semaines.</p>
+    </div>
+  </main>
+
+  <main id="historyView" hidden>
+    <div class="list" id="historyList"></div>
+    <div class="empty" id="historyEmpty" hidden>
+      <div class="big">Historique vide pour l'instant</div>
+      <p>Dès qu'un contrat sera validé ou refusé, il apparaîtra ici avec la date et le commentaire — c'est ce qui fait la traçabilité.</p>
+    </div>
+  </main>
+
+  <main id="overviewView" hidden>
+    <p class="subtitle" style="margin-top:14px">Nombre de contrats par conducteur — sans montants. Le détail complet (tarifs, salaires) est réservé au tableau de bord RH.</p>
+    <div class="ov-table" id="ovTable"></div>
+  </main>
+
+  <button class="back" id="backBtn" hidden>
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+    <span id="backBtnLabel">Changer de conducteur</span>
+  </button>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var DATA = null;
+  var RH_EMAIL = "rh@stam05.fr";
+
+  var els = {
+    genTime: document.getElementById('genTime'),
+    pageTitle: document.getElementById('pageTitle'),
+    subtitle: document.getElementById('subtitle'),
+    tabs: document.getElementById('tabs'),
+    tabPending: document.getElementById('tabPending'),
+    tabEcheances: document.getElementById('tabEcheances'),
+    tabHistory: document.getElementById('tabHistory'),
+    countPending: document.getElementById('countPending'),
+    countEcheances: document.getElementById('countEcheances'),
+    countHistory: document.getElementById('countHistory'),
+    switcher: document.getElementById('switcher'),
+    ovLink: document.getElementById('ovLink'),
+    condList: document.getElementById('condList'),
+    pendingView: document.getElementById('pendingView'),
+    echeancesView: document.getElementById('echeancesView'),
+    historyView: document.getElementById('historyView'),
+    overviewView: document.getElementById('overviewView'),
+    pendingList: document.getElementById('pendingList'),
+    echeancesGroups: document.getElementById('echeancesGroups'),
+    historyList: document.getElementById('historyList'),
+    ovTable: document.getElementById('ovTable'),
+    pendingEmpty: document.getElementById('pendingEmpty'),
+    echeancesEmpty: document.getElementById('echeancesEmpty'),
+    historyEmpty: document.getElementById('historyEmpty'),
+    backBtn: document.getElementById('backBtn'),
+    backBtnLabel: document.getElementById('backBtnLabel'),
+  };
+
+  function escapeHtml(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+
+  function num(v, unit){
+    if (v === null || v === undefined) return '—';
+    return v.toFixed(2).replace('.', ',') + (unit || '');
+  }
+
+  var uid = 0;
+  function nextId(){ return 'c' + (uid++); }
+
+  function renderSwitcher(){
+    var slugs = Object.keys(DATA.conducteurs).sort(function(a,b){
+      return DATA.conducteurs[b].items.length - DATA.conducteurs[a].items.length;
+    });
+    els.condList.innerHTML = slugs.map(function(slug){
+      var c = DATA.conducteurs[slug];
+      return '<button class="cond-btn" data-slug="' + slug + '">' +
+        '<span class="name">' + escapeHtml(c.nom) + '</span>' +
+        '<span class="count tabular">' + c.items.length + '</span>' +
+        '</button>';
+    }).join('');
+    Array.prototype.forEach.call(els.condList.querySelectorAll('.cond-btn'), function(btn){
+      btn.addEventListener('click', function(){
+        location.hash = btn.getAttribute('data-slug');
+      });
+    });
+  }
+
+  /* ---------- message pré-rempli + copie vers le mail --------------- */
+  function buildPanel(id, labels){
+    // labels: {ok, no, extra?} chacun {key, label, prompt}
+    var decisions = labels;
+    return (
+      '<div class="actions">' +
+        decisions.map(function(d){
+          return '<button class="btn ' + d.cls + '" data-id="' + id + '" data-decision="' + d.key + '" aria-pressed="false">' + d.label + '</button>';
+        }).join('') +
+      '</div>' +
+      '<div class="panel" id="panel-' + id + '" hidden>' +
+        '<p id="panelPrompt-' + id + '"></p>' +
+        '<textarea id="comment-' + id + '" placeholder="Commentaire (optionnel)"></textarea>' +
+        '<div class="msg-box">' +
+          '<div class="to">Destinataire : <b>' + RH_EMAIL + '</b></div>' +
+          '<div class="body" id="msgBody-' + id + '"></div>' +
+        '</div>' +
+        '<div class="copy-row">' +
+          '<button class="primary" data-copy-msg="' + id + '">Copier le message</button>' +
+          '<button data-copy-addr="' + id + '">Copier l\'adresse</button>' +
+          '<a id="mailto-' + id + '" href="#">Essayer d\'ouvrir mon mail</a>' +
+          '<span class="copied" id="copied-' + id + '">Copié ✓</span>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function wirePanel(id, item, msgPrefix, decisions){
+    var panel = document.getElementById('panel-' + id);
+    var prompt = document.getElementById('panelPrompt-' + id);
+    var comment = document.getElementById('comment-' + id);
+    var msgBody = document.getElementById('msgBody-' + id);
+    var mailtoA = document.getElementById('mailto-' + id);
+    var copiedSpan = document.getElementById('copied-' + id);
+    var buttons = decisions.map(function(d){
+      return document.querySelector('.btn.' + d.cls + '[data-id="' + id + '"]');
+    });
+    var currentDecision = null;
+
+    function msgText(decision, commentVal){
+      var d = decisions.filter(function(x){ return x.key === decision; })[0];
+      var base = msgPrefix + (d ? d.verbe : decision);
+      if (commentVal && commentVal.trim()) base += " - " + commentVal.trim();
+      return base;
+    }
+
+    function refreshMsg(){
+      var text = msgText(currentDecision, comment.value);
+      msgBody.textContent = text;
+      mailtoA.href = "mailto:" + RH_EMAIL + "?subject=" + encodeURIComponent("Contrat " + item.contrat) + "&body=" + encodeURIComponent(text);
+    }
+
+    function openPanel(decision, d){
+      currentDecision = decision;
+      buttons.forEach(function(b, i){ b.setAttribute('aria-pressed', String(decisions[i].key === decision)); });
+      prompt.textContent = d.prompt;
+      panel.hidden = false;
+      refreshMsg();
+    }
+
+    decisions.forEach(function(d, i){
+      buttons[i].addEventListener('click', function(){
+        if (currentDecision === d.key){ currentDecision = null; panel.hidden = true; buttons[i].setAttribute('aria-pressed','false'); }
+        else openPanel(d.key, d);
+      });
+    });
+    comment.addEventListener('input', refreshMsg);
+
+    function flashCopied(){
+      copiedSpan.classList.add('show');
+      setTimeout(function(){ copiedSpan.classList.remove('show'); }, 1600);
+    }
+    function copyText(text){
+      if (navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(flashCopied, function(){ fallbackCopy(text); });
+      } else { fallbackCopy(text); }
+    }
+    function fallbackCopy(text){
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); flashCopied(); } catch(e){}
+      document.body.removeChild(ta);
+    }
+    document.querySelector('[data-copy-msg="' + id + '"]').addEventListener('click', function(){ copyText(msgBody.textContent); });
+    document.querySelector('[data-copy-addr="' + id + '"]').addEventListener('click', function(){ copyText(RH_EMAIL); });
+  }
+
+  /* ---------- À valider ------------------------------------------- */
+  var VALID_DECISIONS = [
+    {key:'ok', cls:'ok', label:'Valider', verbe:'VALIDE', prompt:"Pour confirmer, envoyez ce message par e-mail (ajoutez un commentaire si besoin) :"},
+    {key:'no', cls:'no', label:'Refuser', verbe:'REFUSE', prompt:"Pour refuser, envoyez ce message par e-mail en précisant si possible la raison :"},
+  ];
+
+  function pendingCardHtml(item){
+    var id = nextId();
+    item._id = id;
+    return '<article class="card">' +
+      '<div class="card-head">' +
+        '<div class="who"><div class="name">' + escapeHtml(item.interimaire) + '</div>' +
+        '<div class="qual">' + escapeHtml(item.qualification || '—') + '</div></div>' +
+        '<span class="chip">' + escapeHtml(item.agence || '') + '</span>' +
+      '</div>' +
+      '<div class="site-row">' +
+        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-7.2 7-12a7 7 0 10-14 0c0 4.8 7 12 7 12z"/><circle cx="12" cy="9" r="2.3"/></svg>' +
+        escapeHtml(item.chantier || '—') +
+      '</div>' +
+      '<div class="grid">' +
+        '<div class="cell"><div class="lbl">Mission</div><div class="val tabular">' + escapeHtml(item.debutMission||'—') + ' → ' + escapeHtml(item.finFerme||'—') + '</div></div>' +
+        '<div class="cell"><div class="lbl">Souplesse</div><div class="val muted tabular">' + escapeHtml(item.debutSouplesse||'—') + ' → ' + escapeHtml(item.finSouplesse||'—') + '</div></div>' +
+        '<div class="cell"><div class="lbl">Heures / sem.</div><div class="val tabular">' + (item.heuresSemaine ?? '—') + ' h</div></div>' +
+        '<div class="cell"><div class="lbl">Salaire / Facturé</div><div class="val tabular">' + num(item.salaire,'') + ' / ' + num(item.tarifFacture,'') + ' €/h</div></div>' +
+      '</div>' +
+      '<div class="thm-row">' +
+        '<div class="thm"><div class="lbl">THM 42h</div><div class="val tabular">' + num(item.thm42) + ' <span class="unit">€/h</span></div></div>' +
+        '<div class="thm"><div class="lbl">THM 39h</div><div class="val tabular">' + num(item.thm39) + ' <span class="unit">€/h</span></div></div>' +
+      '</div>' +
+      buildPanel(id, VALID_DECISIONS) +
+    '</article>';
+  }
+
+  function renderPending(items){
+    if (!items.length){
+      els.pendingList.innerHTML = '';
+      els.pendingEmpty.hidden = false;
+      return;
+    }
+    els.pendingEmpty.hidden = true;
+    els.pendingList.innerHTML = items.map(pendingCardHtml).join('');
+    items.forEach(function(item){
+      wirePanel(item._id, item, "Contrat " + item.contrat + " - " + item.interimaire + " (" + item.chantier + ") : ", VALID_DECISIONS);
+    });
+  }
+
+  /* ---------- Échéances --------------------------------------------- */
+  var ECH_DECISIONS = [
+    {key:'prolonger', cls:'ok', label:'Prolonger', verbe:'PROLONGER', prompt:"Pour demander une prolongation, envoyez ce message (précisez la nouvelle durée souhaitée dans le commentaire) :"},
+    {key:'arreter', cls:'no', label:'Arrêter', verbe:'ARRETER', prompt:"Pour confirmer la fin de mission à la date prévue, envoyez ce message :"},
+    {key:'attente', cls:'wait', label:'Pas encore décidé', verbe:'PAS ENCORE DECIDE', prompt:"Pour prévenir que la décision n'est pas encore prise (on y reviendra), envoyez ce message :"},
+  ];
+
+  function echeanceCardHtml(item){
+    var id = nextId();
+    item._id = id;
+    var badge = item.enRetard
+      ? '<span class="chip bad">Échéance dépassée</span>'
+      : (item.joursRestants <= 7 ? '<span class="chip warn">J-' + item.joursRestants + '</span>' : '<span class="chip">J-' + item.joursRestants + '</span>');
+    return '<article class="card">' +
+      '<div class="card-head">' +
+        '<div class="who"><div class="name">' + escapeHtml(item.interimaire) + '</div>' +
+        '<div class="qual">' + escapeHtml(item.qualification || '—') + '</div></div>' +
+        badge +
+      '</div>' +
+      '<div class="grid" style="margin-top:9px; padding-top:9px">' +
+        '<div class="cell"><div class="lbl">Fin ferme</div><div class="val tabular">' + escapeHtml(item.finFerme||'—') + '</div></div>' +
+        '<div class="cell"><div class="lbl">Contrat</div><div class="val tabular">' + escapeHtml(item.contrat) + '</div></div>' +
+      '</div>' +
+      buildPanel(id, ECH_DECISIONS) +
+    '</article>';
+  }
+
+  function renderEcheances(slug){
+    var c = DATA.echeances[slug];
+    var chantiers = c ? c.chantiers : [];
+    var total = chantiers.reduce(function(n, g){ return n + g.items.length; }, 0);
+    els.countEcheances.textContent = total;
+    if (!total){
+      els.echeancesGroups.innerHTML = '';
+      els.echeancesEmpty.hidden = false;
+      return;
+    }
+    els.echeancesEmpty.hidden = true;
+    els.echeancesGroups.innerHTML = chantiers.map(function(g){
+      return '<div class="site-group">' +
+        '<h2><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-7.2 7-12a7 7 0 10-14 0c0 4.8 7 12 7 12z"/><circle cx="12" cy="9" r="2.3"/></svg>' +
+        escapeHtml(g.chantier) + ' <span class="count">(' + g.items.length + ')</span></h2>' +
+        '<div class="list" style="padding-top:0">' + g.items.map(echeanceCardHtml).join('') + '</div>' +
+      '</div>';
+    }).join('');
+    chantiers.forEach(function(g){
+      g.items.forEach(function(item){
+        wirePanel(item._id, item, "Echeance contrat " + item.contrat + " - " + item.interimaire + " (" + item.chantier + ") : ", ECH_DECISIONS);
+      });
+    });
+  }
+
+  /* ---------- Vue d'ensemble (apercu, sans montants) ----------------- */
+  function renderOverview(){
+    els.ovTable.innerHTML = DATA.apercu.map(function(c){
+      return '<div class="ov-row">' +
+        '<div class="name">' + escapeHtml(c.nom) + '</div>' +
+        '<div class="ov-stat wait"><b class="tabular">' + c.enAttente + '</b><span>attente</span></div>' +
+        '<div class="ov-stat ok"><b class="tabular">' + c.valides + '</b><span>validés</span></div>' +
+        '<div class="ov-stat bad"><b class="tabular">' + c.refuses + '</b><span>refusés</span></div>' +
+      '</div>';
+    }).join('');
+  }
+
+  /* ---------- Routage ------------------------------------------------ */
+  function showTab(which){
+    els.pendingView.hidden = which !== 'pending';
+    els.echeancesView.hidden = which !== 'echeances';
+    els.historyView.hidden = which !== 'history';
+    els.tabPending.setAttribute('aria-selected', String(which === 'pending'));
+    els.tabEcheances.setAttribute('aria-selected', String(which === 'echeances'));
+    els.tabHistory.setAttribute('aria-selected', String(which === 'history'));
+  }
+  els.tabPending.addEventListener('click', function(){ showTab('pending'); });
+  els.tabEcheances.addEventListener('click', function(){ showTab('echeances'); });
+  els.tabHistory.addEventListener('click', function(){ showTab('history'); });
+  els.ovLink.addEventListener('click', function(){ location.hash = 'apercu'; });
+  els.backBtn.addEventListener('click', function(){ location.hash = ''; });
+
+  function renderConducteur(slug){
+    var c = DATA.conducteurs[slug] || {nom:'', items:[]};
+    els.pageTitle.textContent = c.nom;
+    els.subtitle.innerHTML = 'Contrats sur vos chantiers — <strong>' + c.items.length + '</strong> en attente de validation.';
+    els.tabs.hidden = false;
+    els.switcher.hidden = true;
+    els.overviewView.hidden = true;
+    els.backBtn.hidden = false;
+    els.backBtnLabel.textContent = 'Changer de conducteur';
+    els.countPending.textContent = c.items.length;
+    els.countHistory.textContent = 0;
+    renderPending(c.items);
+    renderEcheances(slug);
+    els.historyEmpty.hidden = false;
+    els.historyList.innerHTML = '';
+    showTab('pending');
+  }
+
+  function renderApercuPage(){
+    els.pageTitle.textContent = "État des lieux";
+    els.subtitle.textContent = "Tous les conducteurs, sans montants.";
+    els.tabs.hidden = true;
+    els.switcher.hidden = true;
+    els.pendingView.hidden = true;
+    els.echeancesView.hidden = true;
+    els.historyView.hidden = true;
+    els.overviewView.hidden = false;
+    els.backBtn.hidden = false;
+    els.backBtnLabel.textContent = 'Retour';
+    renderOverview();
+  }
+
+  function renderLanding(){
+    els.pageTitle.textContent = "Contrats à valider";
+    els.subtitle.textContent = "Sélectionnez votre nom pour voir vos contrats.";
+    els.tabs.hidden = true;
+    els.switcher.hidden = false;
+    els.overviewView.hidden = true;
+    els.backBtn.hidden = true;
+    els.pendingView.hidden = true;
+    els.echeancesView.hidden = true;
+    els.historyView.hidden = true;
+  }
+
+  function route(){
+    var slug = location.hash.replace('#','');
+    if (slug === 'apercu'){
+      renderApercuPage();
+    } else if (slug && DATA.conducteurs[slug]){
+      renderConducteur(slug);
+    } else {
+      renderLanding();
+    }
+  }
+
+  function boot(data){
+    DATA = data;
+    els.genTime.textContent = "maj " + DATA.genereLe;
+    renderSwitcher();
+    window.addEventListener('hashchange', route);
+    route();
+  }
+  fetch('/api/data.json').then(function(r){
+    if (!r.ok) throw new Error('http ' + r.status);
+    return r.json();
+  }).then(boot).catch(function(e){
+    document.querySelector('.wrap').innerHTML =
+      '<div class="empty" style="margin-top:60px"><div class="big">Donn\u00e9es indisponibles</div>' +
+      '<p>Impossible de charger les contrats pour le moment. R\u00e9essayez dans une minute, ou pr\u00e9venez le service RH si \u00e7a persiste.</p></div>';
+  });
+})();
+</script>
