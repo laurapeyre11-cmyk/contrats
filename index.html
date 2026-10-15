@@ -142,21 +142,32 @@ h1{font-size:21px; font-weight:800; margin:0; line-height:1.15}
   width:100%; min-height:52px; resize:vertical; border:1px solid var(--border); border-radius:8px;
   padding:8px 9px; font:400 13px "Public Sans"; background:var(--surface); color:var(--fg);
 }
-.msg-box{
-  margin-top:9px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px;
-  padding:9px 10px; font-size:12.5px;
+.field-date{margin-bottom:9px}
+.field-date[hidden]{display:none!important}
+.field-date label{display:block; font-size:11.5px; color:var(--fg-muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:.04em}
+.field-date input{
+  width:100%; border:1px solid var(--border); border-radius:8px; padding:8px 9px;
+  font:500 13px "Public Sans"; background:var(--surface); color:var(--fg);
 }
-.msg-box .to{color:var(--fg-muted)}
-.msg-box .to b{color:var(--fg); font-weight:600}
-.msg-box .body{margin-top:5px; font-weight:500; white-space:pre-wrap}
-.copy-row{display:flex; gap:8px; margin-top:9px; flex-wrap:wrap}
-.copy-row button, .copy-row a{
-  font:600 12.5px "Public Sans"; padding:7px 11px; border-radius:7px; border:1px solid var(--border);
-  background:var(--surface); color:var(--fg); cursor:pointer; text-decoration:none;
+.submit-row{display:flex; align-items:center; gap:10px; margin-top:9px; flex-wrap:wrap}
+.submit-row .primary{
+  font:600 13px "Public Sans"; padding:9px 16px; border-radius:8px; border:1px solid var(--accent);
+  background:var(--accent); color:var(--accent-ink); cursor:pointer;
 }
-.copy-row button.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent)}
-.copied{font-size:11.5px; color:var(--good); margin-left:2px; opacity:0; transition:opacity .15s}
-.copied.show{opacity:1}
+.submit-row .primary:disabled{opacity:.6; cursor:default}
+.submit-row .err{font-size:12px; color:var(--bad)}
+.submit-row .err[hidden]{display:none!important}
+.done{
+  margin-top:11px; padding:9px 11px; border-radius:8px; background:var(--good-bg); color:var(--good);
+  font:600 12.5px "Public Sans";
+}
+.done[hidden]{display:none!important}
+.card.decided .actions{display:none}
+.chip.ok{background:var(--good-bg); color:var(--good)}
+.chip.no{background:var(--bad-bg); color:var(--bad)}
+.card.hist .hist-detail{margin-top:9px; padding-top:9px; border-top:1px solid var(--border); font-size:13px}
+.card.hist .hist-detail.muted{color:var(--fg-muted); font-style:italic; border-top:none; padding-top:0; margin-top:4px}
+.card.hist .hist-date{margin-top:6px; font-size:11.5px; color:var(--fg-muted)}
 
 /* echeances : regroupe par chantier */
 .site-group{margin-top:18px}
@@ -260,7 +271,7 @@ h1{font-size:21px; font-weight:800; margin:0; line-height:1.15}
 (function(){
   "use strict";
   var DATA = null;
-  var RH_EMAIL = "rh@stam05.fr";
+  var onDecided = null; // callback set per-conducteur view to refresh counts after a decision
 
   var els = {
     genTime: document.getElementById('genTime'),
@@ -323,9 +334,9 @@ h1{font-size:21px; font-weight:800; margin:0; line-height:1.15}
     });
   }
 
-  /* ---------- message pré-rempli + copie vers le mail --------------- */
+  /* ---------- decision enregistree directement sur le site ----------- */
   function buildPanel(id, labels){
-    // labels: {ok, no, extra?} chacun {key, label, prompt}
+    // labels: tableau de {key, cls, label, verbe, prompt, needsDate?}
     var decisions = labels;
     return (
       '<div class="actions">' +
@@ -335,52 +346,42 @@ h1{font-size:21px; font-weight:800; margin:0; line-height:1.15}
       '</div>' +
       '<div class="panel" id="panel-' + id + '" hidden>' +
         '<p id="panelPrompt-' + id + '"></p>' +
+        '<div class="field-date" id="fieldDate-' + id + '" hidden>' +
+          '<label for="date-' + id + '">Nouvelle date de fin</label>' +
+          '<input type="date" id="date-' + id + '">' +
+        '</div>' +
         '<textarea id="comment-' + id + '" placeholder="Commentaire (optionnel)"></textarea>' +
-        '<div class="msg-box">' +
-          '<div class="to">Destinataire : <b>' + RH_EMAIL + '</b></div>' +
-          '<div class="body" id="msgBody-' + id + '"></div>' +
+        '<div class="submit-row">' +
+          '<button class="primary" id="submit-' + id + '">Enregistrer</button>' +
+          '<span class="err" id="err-' + id + '" hidden></span>' +
         '</div>' +
-        '<div class="copy-row">' +
-          '<button class="primary" data-copy-msg="' + id + '">Copier le message</button>' +
-          '<button data-copy-addr="' + id + '">Copier l\'adresse</button>' +
-          '<a id="mailto-' + id + '" href="#">Essayer d\'ouvrir mon mail</a>' +
-          '<span class="copied" id="copied-' + id + '">Copié ✓</span>' +
-        '</div>' +
-      '</div>'
+      '</div>' +
+      '<div class="done" id="done-' + id + '" hidden></div>'
     );
   }
 
-  function wirePanel(id, item, msgPrefix, decisions){
+  function wirePanel(id, item, decisions){
     var panel = document.getElementById('panel-' + id);
     var prompt = document.getElementById('panelPrompt-' + id);
     var comment = document.getElementById('comment-' + id);
-    var msgBody = document.getElementById('msgBody-' + id);
-    var mailtoA = document.getElementById('mailto-' + id);
-    var copiedSpan = document.getElementById('copied-' + id);
+    var fieldDate = document.getElementById('fieldDate-' + id);
+    var dateInput = document.getElementById('date-' + id);
+    var submitBtn = document.getElementById('submit-' + id);
+    var errSpan = document.getElementById('err-' + id);
+    var doneBox = document.getElementById('done-' + id);
+    var article = panel.closest('.card');
     var buttons = decisions.map(function(d){
       return document.querySelector('.btn.' + d.cls + '[data-id="' + id + '"]');
     });
     var currentDecision = null;
 
-    function msgText(decision, commentVal){
-      var d = decisions.filter(function(x){ return x.key === decision; })[0];
-      var base = msgPrefix + (d ? d.verbe : decision);
-      if (commentVal && commentVal.trim()) base += " - " + commentVal.trim();
-      return base;
-    }
-
-    function refreshMsg(){
-      var text = msgText(currentDecision, comment.value);
-      msgBody.textContent = text;
-      mailtoA.href = "mailto:" + RH_EMAIL + "?subject=" + encodeURIComponent("Contrat " + item.contrat) + "&body=" + encodeURIComponent(text);
-    }
-
     function openPanel(decision, d){
       currentDecision = decision;
       buttons.forEach(function(b, i){ b.setAttribute('aria-pressed', String(decisions[i].key === decision)); });
       prompt.textContent = d.prompt;
+      fieldDate.hidden = !d.needsDate;
+      errSpan.hidden = true;
       panel.hidden = false;
-      refreshMsg();
     }
 
     decisions.forEach(function(d, i){
@@ -389,32 +390,54 @@ h1{font-size:21px; font-weight:800; margin:0; line-height:1.15}
         else openPanel(d.key, d);
       });
     });
-    comment.addEventListener('input', refreshMsg);
 
-    function flashCopied(){
-      copiedSpan.classList.add('show');
-      setTimeout(function(){ copiedSpan.classList.remove('show'); }, 1600);
+    function isoToFR(iso){
+      if (!iso) return null;
+      var p = iso.split('-');
+      return p.length === 3 ? (p[2] + '/' + p[1] + '/' + p[0]) : null;
     }
-    function copyText(text){
-      if (navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(text).then(flashCopied, function(){ fallbackCopy(text); });
-      } else { fallbackCopy(text); }
-    }
-    function fallbackCopy(text){
-      var ta = document.createElement('textarea');
-      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.select();
-      try { document.execCommand('copy'); flashCopied(); } catch(e){}
-      document.body.removeChild(ta);
-    }
-    document.querySelector('[data-copy-msg="' + id + '"]').addEventListener('click', function(){ copyText(msgBody.textContent); });
-    document.querySelector('[data-copy-addr="' + id + '"]').addEventListener('click', function(){ copyText(RH_EMAIL); });
+
+    submitBtn.addEventListener('click', function(){
+      var d = decisions.filter(function(x){ return x.key === currentDecision; })[0];
+      if (!d) return;
+      var nouvelleDateFin = d.needsDate ? isoToFR(dateInput.value) : null;
+      if (d.needsDate && !nouvelleDateFin){
+        errSpan.textContent = 'Merci de choisir une date.';
+        errSpan.hidden = false;
+        return;
+      }
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Envoi…';
+      errSpan.hidden = true;
+      fetch('/api/decision', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ contrat: item.contrat, decision: currentDecision, commentaire: comment.value, nouvelleDateFin: nouvelleDateFin })
+      }).then(function(r){
+        if (!r.ok) throw new Error('http ' + r.status);
+        return r.json();
+      }).then(function(){
+        item.statut = {ok:'valide', no:'refuse', prolonger:'prolonge', arreter:'arrete', attente:'attente'}[currentDecision];
+        item.commentaire = comment.value.trim() || null;
+        item.nouvelleDateFin = nouvelleDateFin || undefined;
+        panel.hidden = true;
+        doneBox.hidden = false;
+        doneBox.textContent = '✓ Enregistré — ' + d.verbe.charAt(0) + d.verbe.slice(1).toLowerCase();
+        if (article) article.classList.add('decided');
+        if (typeof onDecided === 'function') onDecided();
+      }).catch(function(){
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Enregistrer';
+        errSpan.textContent = 'Échec de l\'enregistrement — vérifiez votre connexion et réessayez.';
+        errSpan.hidden = false;
+      });
+    });
   }
 
   /* ---------- À valider ------------------------------------------- */
   var VALID_DECISIONS = [
-    {key:'ok', cls:'ok', label:'Valider', verbe:'VALIDE', prompt:"Pour confirmer, envoyez ce message par e-mail (ajoutez un commentaire si besoin) :"},
-    {key:'no', cls:'no', label:'Refuser', verbe:'REFUSE', prompt:"Pour refuser, envoyez ce message par e-mail en précisant si possible la raison :"},
+    {key:'ok', cls:'ok', label:'Valider', verbe:'VALIDÉ', prompt:"Confirmez la validation (un commentaire est possible, mais optionnel) :"},
+    {key:'no', cls:'no', label:'Refuser', verbe:'REFUSÉ', prompt:"Confirmez le refus — précisez la raison si possible :"},
   ];
 
   function pendingCardHtml(item){
@@ -444,7 +467,10 @@ h1{font-size:21px; font-weight:800; margin:0; line-height:1.15}
     '</article>';
   }
 
-  function renderPending(items){
+  function isDecided(item){ return !!item.statut && item.statut !== 'attente'; }
+
+  function renderPending(allItems){
+    var items = allItems.filter(function(it){ return !isDecided(it); });
     if (!items.length){
       els.pendingList.innerHTML = '';
       els.pendingEmpty.hidden = false;
@@ -453,15 +479,15 @@ h1{font-size:21px; font-weight:800; margin:0; line-height:1.15}
     els.pendingEmpty.hidden = true;
     els.pendingList.innerHTML = items.map(pendingCardHtml).join('');
     items.forEach(function(item){
-      wirePanel(item._id, item, "Contrat " + item.contrat + " - " + item.interimaire + " (" + item.chantier + ") : ", VALID_DECISIONS);
+      wirePanel(item._id, item, VALID_DECISIONS);
     });
   }
 
   /* ---------- Échéances --------------------------------------------- */
   var ECH_DECISIONS = [
-    {key:'prolonger', cls:'ok', label:'Prolonger', verbe:'PROLONGER', prompt:"Pour demander une prolongation, envoyez ce message (précisez la nouvelle durée souhaitée dans le commentaire) :"},
-    {key:'arreter', cls:'no', label:'Arrêter', verbe:'ARRETER', prompt:"Pour confirmer la fin de mission à la date prévue, envoyez ce message :"},
-    {key:'attente', cls:'wait', label:'Pas encore décidé', verbe:'PAS ENCORE DECIDE', prompt:"Pour prévenir que la décision n'est pas encore prise (on y reviendra), envoyez ce message :"},
+    {key:'prolonger', cls:'ok', label:'Prolonger', verbe:'PROLONGATION DEMANDÉE', needsDate:true, prompt:"Indiquez la nouvelle date de fin souhaitée :"},
+    {key:'arreter', cls:'no', label:'Arrêter', verbe:'ARRÊT CONFIRMÉ', prompt:"Confirmez la fin de mission à la date prévue :"},
+    {key:'attente', cls:'wait', label:'Pas encore décidé', verbe:'EN ATTENTE', prompt:"Pas de souci, vous pourrez revenir sur cette échéance plus tard."},
   ];
 
   function echeanceCardHtml(item){
@@ -486,7 +512,10 @@ h1{font-size:21px; font-weight:800; margin:0; line-height:1.15}
 
   function renderEcheances(slug){
     var c = DATA.echeances[slug];
-    var chantiers = c ? c.chantiers : [];
+    var allChantiers = c ? c.chantiers : [];
+    var chantiers = allChantiers.map(function(g){
+      return { chantier: g.chantier, items: g.items.filter(function(it){ return !isDecided(it); }) };
+    }).filter(function(g){ return g.items.length > 0; });
     var total = chantiers.reduce(function(n, g){ return n + g.items.length; }, 0);
     els.countEcheances.textContent = total;
     if (!total){
@@ -504,9 +533,48 @@ h1{font-size:21px; font-weight:800; margin:0; line-height:1.15}
     }).join('');
     chantiers.forEach(function(g){
       g.items.forEach(function(item){
-        wirePanel(item._id, item, "Echeance contrat " + item.contrat + " - " + item.interimaire + " (" + item.chantier + ") : ", ECH_DECISIONS);
+        wirePanel(item._id, item, ECH_DECISIONS);
       });
     });
+  }
+
+  /* ---------- Historique ---------------------------------------------- */
+  function parseFR(d){
+    if (!d) return 0;
+    var p = d.split('/');
+    return p.length === 3 ? Date.UTC(+p[2], +p[1]-1, +p[0]) : 0;
+  }
+
+  function historyRowHtml(item){
+    var label = {valide:'Validé', refuse:'Refusé', prolonge:'Prolongation demandée', arrete:'Arrêt confirmé'}[item.statut] || item.statut;
+    var cls = {valide:'ok', refuse:'no', prolonge:'ok', arrete:'no'}[item.statut] || 'wait';
+    return '<article class="card hist">' +
+      '<div class="card-head">' +
+        '<div class="who"><div class="name">' + escapeHtml(item.interimaire) + '</div>' +
+        '<div class="qual">' + escapeHtml(item.chantier || '—') + ' · Contrat ' + escapeHtml(item.contrat) + '</div></div>' +
+        '<span class="chip ' + cls + '">' + label + '</span>' +
+      '</div>' +
+      (item.nouvelleDateFin ? '<div class="hist-detail">Nouvelle date de fin demandée : <b class="tabular">' + escapeHtml(item.nouvelleDateFin) + '</b></div>' : '') +
+      (item.commentaire ? '<div class="hist-detail muted">“' + escapeHtml(item.commentaire) + '”</div>' : '') +
+      '<div class="hist-date">Le ' + escapeHtml(item.valideLe || '—') + '</div>' +
+    '</article>';
+  }
+
+  function renderHistory(slug){
+    var c = DATA.conducteurs[slug] || {items:[]};
+    var ech = DATA.echeances[slug] ? DATA.echeances[slug].chantiers : [];
+    var items = c.items.filter(isDecided).concat(
+      ech.reduce(function(acc, g){ return acc.concat(g.items.filter(isDecided).map(function(it){ return Object.assign({}, it, {chantier: it.chantier || g.chantier}); })); }, [])
+    );
+    items.sort(function(a, b){ return parseFR(b.valideLe) - parseFR(a.valideLe); });
+    els.countHistory.textContent = items.length;
+    if (!items.length){
+      els.historyList.innerHTML = '';
+      els.historyEmpty.hidden = false;
+      return;
+    }
+    els.historyEmpty.hidden = true;
+    els.historyList.innerHTML = items.map(historyRowHtml).join('');
   }
 
   /* ---------- Vue d'ensemble (apercu, sans montants) ----------------- */
@@ -538,19 +606,23 @@ h1{font-size:21px; font-weight:800; margin:0; line-height:1.15}
 
   function renderConducteur(slug){
     var c = DATA.conducteurs[slug] || {nom:'', items:[]};
+    var pendingCount = c.items.filter(function(it){ return !isDecided(it); }).length;
     els.pageTitle.textContent = c.nom;
-    els.subtitle.innerHTML = 'Contrats sur vos chantiers — <strong>' + c.items.length + '</strong> en attente de validation.';
+    els.subtitle.innerHTML = 'Contrats sur vos chantiers — <strong>' + pendingCount + '</strong> en attente de validation.';
     els.tabs.hidden = false;
     els.switcher.hidden = true;
     els.overviewView.hidden = true;
     els.backBtn.hidden = false;
     els.backBtnLabel.textContent = 'Changer de conducteur';
-    els.countPending.textContent = c.items.length;
-    els.countHistory.textContent = 0;
+    els.countPending.textContent = pendingCount;
+    onDecided = function(){
+      els.countPending.textContent = c.items.filter(function(it){ return !isDecided(it); }).length;
+      els.subtitle.innerHTML = 'Contrats sur vos chantiers — <strong>' + c.items.filter(function(it){ return !isDecided(it); }).length + '</strong> en attente de validation.';
+      renderHistory(slug);
+    };
     renderPending(c.items);
     renderEcheances(slug);
-    els.historyEmpty.hidden = false;
-    els.historyList.innerHTML = '';
+    renderHistory(slug);
     showTab('pending');
   }
 

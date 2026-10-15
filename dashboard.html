@@ -107,6 +107,14 @@ h1{font-size:21px; font-weight:800; margin:6px 0 2px; line-height:1.15}
 .row .echbadge{align-self:start; font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:6px; white-space:nowrap; background:var(--chip-bg); color:var(--fg-muted)}
 .row .echbadge.warn{background:var(--warn-bg); color:var(--warn)}
 .row .echbadge.bad{background:var(--bad-bg); color:var(--bad)}
+.row.unassigned{border-color:var(--warn)}
+.row .assign{grid-column:1/-1; display:flex; gap:8px; align-items:center; margin-top:7px; padding-top:7px; border-top:1px solid var(--border); flex-wrap:wrap}
+.row .assign .flag{font-size:11px; font-weight:700; color:var(--warn); text-transform:uppercase; letter-spacing:.03em}
+.row .assign select{font:500 12.5px "Public Sans"; padding:6px 8px; border-radius:7px; border:1px solid var(--border); background:var(--surface); color:var(--fg); flex:1; min-width:150px}
+.row .assign button{font:600 12px "Public Sans"; padding:6px 11px; border-radius:7px; border:1px solid var(--accent); background:var(--accent); color:var(--accent-ink); cursor:pointer}
+.row .assign button:disabled{opacity:.6; cursor:default}
+.row .assign .ok-msg{font-size:11.5px; color:var(--good); font-weight:600}
+.row .reassign-toggle{font:600 11.5px "Public Sans"; padding:5px 9px; border-radius:6px; border:1px solid var(--border); background:var(--surface-2); color:var(--fg-muted); cursor:pointer}
 
 .empty{margin-top:18px; text-align:center; padding:30px 18px; border:1px dashed var(--border); border-radius:12px; color:var(--fg-muted); font-size:13px}
 [hidden]{display:none!important}
@@ -133,6 +141,13 @@ h1{font-size:21px; font-weight:800; margin:6px 0 2px; line-height:1.15}
   <main id="itemsView">
     <div class="filters">
       <select id="fConducteur"></select>
+      <select id="fChantier"></select>
+      <select id="fSort">
+        <option value="nom">Trier : nom (A→Z)</option>
+        <option value="debut">Trier : date de début (plus proche)</option>
+        <option value="debutDesc">Trier : date de début (plus lointaine)</option>
+        <option value="chantier">Trier : chantier (A→Z)</option>
+      </select>
       <input id="fSearch" type="text" placeholder="Chercher un nom, un n° de contrat, un chantier…">
     </div>
     <div class="chips" id="fStatus">
@@ -149,6 +164,12 @@ h1{font-size:21px; font-weight:800; margin:6px 0 2px; line-height:1.15}
   <main id="echView" hidden>
     <div class="filters">
       <select id="fConducteurEch"></select>
+      <select id="fChantierEch"></select>
+      <select id="fSortEch">
+        <option value="nom">Trier : nom (A→Z)</option>
+        <option value="fin">Trier : échéance (la plus proche)</option>
+        <option value="chantier">Trier : chantier (A→Z)</option>
+      </select>
       <input id="fSearchEch" type="text" placeholder="Chercher un nom, un chantier…">
     </div>
     <div class="result-count" id="echCount"></div>
@@ -170,16 +191,27 @@ h1{font-size:21px; font-weight:800; margin:6px 0 2px; line-height:1.15}
   function num(v, unit){ if (v === null || v === undefined) return '—'; return v.toFixed(2).replace('.', ',') + (unit || ''); }
   function euro0(v){ return Math.round(v).toLocaleString('fr-FR') + ' €'; }
 
-  function fillSelect(sel, noms){
-    sel.innerHTML = '<option value="tous">Tous les conducteurs</option>' +
+  function fillSelect(sel, noms, allLabel){
+    sel.innerHTML = '<option value="tous">' + allLabel + '</option>' +
       noms.map(function(n){ return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('');
+  }
+
+  function parseFR(d){
+    if (!d) return 0;
+    var p = d.split('/');
+    return p.length === 3 ? Date.UTC(+p[2], +p[1]-1, +p[0]) : 0;
   }
 
   var fConducteur = document.getElementById('fConducteur');
   var fConducteurEch = document.getElementById('fConducteurEch');
+  var fChantier = document.getElementById('fChantier');
+  var fChantierEch = document.getElementById('fChantierEch');
+  var fSort = document.getElementById('fSort');
+  var fSortEch = document.getElementById('fSortEch');
   var fSearch = document.getElementById('fSearch');
   var fSearchEch = document.getElementById('fSearchEch');
   var statusFilter = 'tous';
+  var CONDUCTEURS = []; // [{nom, mail}] pour le menu de réattribution, chargé depuis /api/conducteurs
   document.querySelectorAll('#fStatus .chipbtn').forEach(function(b){
     b.addEventListener('click', function(){
       document.querySelectorAll('#fStatus .chipbtn').forEach(function(x){ x.setAttribute('aria-pressed', String(x === b)); });
@@ -188,8 +220,12 @@ h1{font-size:21px; font-weight:800; margin:6px 0 2px; line-height:1.15}
     });
   });
   fConducteur.addEventListener('change', renderItems);
+  fChantier.addEventListener('change', renderItems);
+  fSort.addEventListener('change', renderItems);
   fSearch.addEventListener('input', renderItems);
   fConducteurEch.addEventListener('change', renderEch);
+  fChantierEch.addEventListener('change', renderEch);
+  fSortEch.addEventListener('change', renderEch);
   fSearchEch.addEventListener('input', renderEch);
 
   function matchSearch(hay, needle){
@@ -197,13 +233,69 @@ h1{font-size:21px; font-weight:800; margin:6px 0 2px; line-height:1.15}
     return hay.toLowerCase().indexOf(needle.toLowerCase()) !== -1;
   }
 
+  function sortItems(list, mode, dateField){
+    var copy = list.slice();
+    if (mode === 'nom') copy.sort(function(a,b){ return a.interimaire.localeCompare(b.interimaire, 'fr'); });
+    else if (mode === 'chantier') copy.sort(function(a,b){ return (a.chantier||'').localeCompare(b.chantier||'', 'fr'); });
+    else if (mode === 'debut') copy.sort(function(a,b){ return parseFR(a[dateField]) - parseFR(b[dateField]); });
+    else if (mode === 'debutDesc') copy.sort(function(a,b){ return parseFR(b[dateField]) - parseFR(a[dateField]); });
+    else if (mode === 'fin') copy.sort(function(a,b){ return parseFR(a[dateField]) - parseFR(b[dateField]); });
+    return copy;
+  }
+
+  function assignRowHtml(it){
+    var unassigned = it.conducteur === 'rh';
+    var options = CONDUCTEURS.map(function(c){
+      return '<option value="' + esc(c.nom) + '" data-mail="' + esc(c.mail||'') + '"' + (c.nom === it.conducteur ? ' selected' : '') + '>' + esc(c.nom) + '</option>';
+    }).join('');
+    return '<div class="assign" data-contrat="' + esc(it.contrat) + '"' + (unassigned ? '' : ' hidden') + '>' +
+      (unassigned ? '<span class="flag">À attribuer</span>' : '') +
+      '<select class="assign-select">' + options + '</select>' +
+      '<button class="assign-btn">Attribuer</button>' +
+      '<span class="ok-msg" hidden>✓ Attribué</span>' +
+    '</div>';
+  }
+
+  function wireAssignRow(container, it){
+    var box = container.querySelector('.assign[data-contrat="' + String(it.contrat).replace(/"/g,'') + '"]');
+    if (!box) return;
+    var btn = box.querySelector('.assign-btn');
+    var sel = box.querySelector('.assign-select');
+    var okMsg = box.querySelector('.ok-msg');
+    btn.addEventListener('click', function(){
+      var opt = sel.options[sel.selectedIndex];
+      if (!opt) return;
+      btn.disabled = true;
+      fetch('/api/reassign', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ contrat: it.contrat, conducteur: opt.value, conducteurMail: opt.getAttribute('data-mail') || null })
+      }).then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+        .then(function(){
+          it.conducteur = opt.value;
+          okMsg.hidden = false;
+          btn.disabled = false;
+          setTimeout(function(){ renderItems(); renderEch(); }, 500);
+        }).catch(function(){
+          btn.disabled = false;
+          okMsg.textContent = 'Échec — réessayez';
+          okMsg.hidden = false;
+        });
+    });
+  }
+
+  function toggleRowHtml(it){
+    return it.conducteur === 'rh' ? '' : '<button class="reassign-toggle" data-contrat="' + esc(it.contrat) + '">Changer le responsable</button>';
+  }
+
   function itemRowHtml(it){
-    return '<div class="row">' +
+    var unassigned = it.conducteur === 'rh';
+    return '<div class="row' + (unassigned ? ' unassigned' : '') + '">' +
       '<div class="main">' +
         '<div class="name">' + esc(it.interimaire) + '</div>' +
         '<div class="meta"><span>' + esc(it.conducteur) + '</span><span>' + esc(it.chantier || '—') + '</span><span>Contrat ' + esc(it.contrat) + '</span></div>' +
       '</div>' +
-      '<span class="status ' + it.statut + '">' + ({attente:'En attente', valide:'Validé', refuse:'Refusé'}[it.statut]) + '</span>' +
+      '<span class="status ' + it.statut + '">' + ({attente:'En attente', valide:'Validé', refuse:'Refusé', prolonge:'Prolongation', arrete:'Arrêt confirmé'}[it.statut] || it.statut) + '</span>' +
       '<div class="nums">' +
         '<span>Mission <b class="tabular">' + esc(it.debutMission||'—') + ' → ' + esc(it.finFerme||'—') + '</b></span>' +
         '<span>Salaire <b class="tabular">' + num(it.salaire) + '</b> €/h</span>' +
@@ -212,26 +304,42 @@ h1{font-size:21px; font-weight:800; margin:6px 0 2px; line-height:1.15}
         (it.valideLe ? '<span>Le <b class="tabular">' + esc(it.valideLe) + '</b></span>' : '') +
       '</div>' +
       (it.commentaire ? '<div class="comment">“' + esc(it.commentaire) + '”</div>' : '') +
+      toggleRowHtml(it) +
+      assignRowHtml(it) +
     '</div>';
   }
 
+  function wireItemRow(container, it){
+    wireAssignRow(container, it);
+    if (it.conducteur !== 'rh') {
+      var cid = String(it.contrat).replace(/"/g,'');
+      var toggle = container.querySelector('.reassign-toggle[data-contrat="' + cid + '"]');
+      var box = container.querySelector('.assign[data-contrat="' + cid + '"]');
+      if (toggle && box) toggle.addEventListener('click', function(){ box.hidden = !box.hidden; });
+    }
+  }
+
   function renderItems(){
-    var cond = fConducteur.value, q = fSearch.value.trim();
+    var cond = fConducteur.value, chant = fChantier.value, q = fSearch.value.trim();
     var filtered = DATA.items.filter(function(it){
       if (statusFilter !== 'tous' && it.statut !== statusFilter) return false;
       if (cond !== 'tous' && it.conducteur !== cond) return false;
+      if (chant !== 'tous' && it.chantier !== chant) return false;
       if (q && !matchSearch([it.interimaire, it.contrat, it.chantier, it.conducteur].join(' '), q)) return false;
       return true;
     });
+    filtered = sortItems(filtered, fSort.value, 'debutMission');
     document.getElementById('itemsCount').textContent = filtered.length + ' contrat(s)';
-    document.getElementById('itemsRows').innerHTML = filtered.map(itemRowHtml).join('');
+    var rows = document.getElementById('itemsRows');
+    rows.innerHTML = filtered.map(itemRowHtml).join('');
+    filtered.forEach(function(it){ wireItemRow(rows, it); });
     document.getElementById('itemsEmpty').hidden = filtered.length !== 0;
   }
 
   function echRowHtml(it){
     var cls = it.enRetard ? 'bad' : (it.joursRestants <= 7 ? 'warn' : '');
     var label = it.enRetard ? 'Échéance dépassée' : ('J-' + it.joursRestants);
-    return '<div class="row">' +
+    return '<div class="row' + (it.conducteur === 'rh' ? ' unassigned' : '') + '">' +
       '<div class="main">' +
         '<div class="name">' + esc(it.interimaire) + '</div>' +
         '<div class="meta"><span>' + esc(it.conducteur) + '</span><span>' + esc(it.chantier || '—') + '</span><span>Contrat ' + esc(it.contrat) + '</span></div>' +
@@ -243,18 +351,24 @@ h1{font-size:21px; font-weight:800; margin:6px 0 2px; line-height:1.15}
         '<span>Facturé <b class="tabular">' + num(it.tarifFacture) + '</b> €/h</span>' +
         '<span>THM 42h <b class="tabular">' + num(it.thm42) + '</b> €/h</span>' +
       '</div>' +
+      toggleRowHtml(it) +
+      assignRowHtml(it) +
     '</div>';
   }
 
   function renderEch(){
-    var cond = fConducteurEch.value, q = fSearchEch.value.trim();
+    var cond = fConducteurEch.value, chant = fChantierEch.value, q = fSearchEch.value.trim();
     var filtered = DATA.echeances.filter(function(it){
       if (cond !== 'tous' && it.conducteur !== cond) return false;
+      if (chant !== 'tous' && it.chantier !== chant) return false;
       if (q && !matchSearch([it.interimaire, it.contrat, it.chantier, it.conducteur].join(' '), q)) return false;
       return true;
     });
+    filtered = sortItems(filtered, fSortEch.value, 'finFerme');
     document.getElementById('echCount').textContent = filtered.length + ' échéance(s)';
-    document.getElementById('echRows').innerHTML = filtered.map(echRowHtml).join('');
+    var rows = document.getElementById('echRows');
+    rows.innerHTML = filtered.map(echRowHtml).join('');
+    filtered.forEach(function(it){ wireItemRow(rows, it); });
     document.getElementById('echEmpty').hidden = filtered.length !== 0;
   }
 
@@ -295,17 +409,24 @@ h1{font-size:21px; font-weight:800; margin:6px 0 2px; line-height:1.15}
     }).join('');
 
     var nomsConducteurs = DATA.apercu.map(function(c){ return c.nom; });
-    fillSelect(fConducteur, nomsConducteurs);
-    fillSelect(fConducteurEch, nomsConducteurs);
+    fillSelect(fConducteur, nomsConducteurs, 'Tous les conducteurs');
+    fillSelect(fConducteurEch, nomsConducteurs, 'Tous les conducteurs');
+
+    var chantiersUniques = Array.from(new Set(DATA.items.map(function(it){ return it.chantier; }).filter(Boolean))).sort(function(a,b){ return a.localeCompare(b,'fr'); });
+    fillSelect(fChantier, chantiersUniques, 'Tous les chantiers');
+    fillSelect(fChantierEch, chantiersUniques, 'Tous les chantiers');
 
     renderItems();
     renderEch();
   }
 
-  fetch('/api/dashboard.json').then(function(r){
-    if (!r.ok) throw new Error('http ' + r.status);
-    return r.json();
-  }).then(boot).catch(function(e){
+  Promise.all([
+    fetch('/api/dashboard.json').then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); }),
+    fetch('/api/conducteurs').then(function(r){ return r.ok ? r.json() : {conducteurs:[]}; }).catch(function(){ return {conducteurs:[]}; })
+  ]).then(function(results){
+    CONDUCTEURS = results[1].conducteurs || [];
+    boot(results[0]);
+  }).catch(function(e){
     document.querySelector('.wrap').innerHTML =
       '<div class="empty" style="margin-top:60px">Données indisponibles pour le moment. Réessayez dans une minute.</div>';
   });
