@@ -1,18 +1,26 @@
 // STAM - serveur de la page de validation des contrats interim.
 //
-// Architecture volontairement simple :
-//  - express.static sert public/page.html (et ses assets) : page PUBLIQUE,
-//    conducteurs, sans montants pour la vue d'ensemble.
+// Architecture volontairement simple, et volontairement a plat (tous les
+// fichiers a la racine du depot, pas de sous-dossiers) pour que le depot
+// GitHub reste facile a mettre a jour a la main depuis l'interface web :
+//  - GET /            sert index.html : page PUBLIQUE, conducteurs, sans
+//    montants pour la vue d'ensemble.
 //  - GET /dashboard (+ /api/dashboard.json) : page PRIVEE RH, avec montants,
 //    protegee par une authentification HTTP Basic (identifiant/mot de passe
 //    definis uniquement via des variables d'environnement Render, jamais
 //    dans ce code source).
 //  - GET /api/data.json : donnees publiques (contrats a valider + echeances
-//    + apercu sans montants), lues depuis data/data.json.
+//    + apercu sans montants), lues depuis data.json.
 //  - POST /api/refresh : webhook protege par un jeton secret (en-tete
 //    x-refresh-token), appele periodiquement pour pousser des donnees
 //    fraiches sans avoir besoin de redeployer le site. Les donnees recues
-//    sont ecrites sur disque pour survivre a un redemarrage du service.
+//    sont ecrites sur disque (data.json / dashboard.json) pour survivre a
+//    un redemarrage du service.
+//
+// Important : il n'y a volontairement AUCUN middleware express.static ici.
+// Servir tout le dossier en statique exposerait data.json et dashboard.json
+// (qui contiennent les salaires) sans authentification. Seules les routes
+// explicites ci-dessous repondent, chacune avec son propre controle d'acces.
 //
 // Rien ici ne depend de Claude ou de claude.ai : une fois ce service
 // deploye sur Render, il continue de fonctionner (avec les dernieres
@@ -25,11 +33,8 @@ const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATA_DIR = path.join(__dirname, 'data');
-const DATA_FILE = path.join(DATA_DIR, 'data.json');
-const DASHBOARD_FILE = path.join(DATA_DIR, 'dashboard.json');
-
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+const DATA_FILE = path.join(__dirname, 'data.json');
+const DASHBOARD_FILE = path.join(__dirname, 'dashboard.json');
 
 function readJsonSafe(file, fallback) {
   try {
@@ -90,7 +95,9 @@ function requireRhAuth(req, res, next) {
 // ---------------------------------------------------------------------
 // Pages
 // ---------------------------------------------------------------------
-app.use(express.static(path.join(__dirname, 'public')));
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 app.get('/dashboard', requireRhAuth, (req, res) => {
   res.sendFile(path.join(__dirname, 'dashboard.html'));
