@@ -206,6 +206,21 @@ function rebuildServed() {
   served = buildServed();
 }
 
+// STAM V6 - CORS : le fichier "pousser_donnees.html" que RH ouvre en local
+// (file://) appelle /api/refresh depuis une origine differente de celle du
+// site Render. Sans ces en-tetes, le navigateur bloque la reponse avant
+// meme qu'elle n'arrive au script (erreur "Failed to fetch" cote client,
+// constate en reel par Laura Peyre le 16/10/2026). Le jeton x-refresh-token
+// reste le vrai controle d'acces : CORS ne fait qu'autoriser le navigateur a
+// transmettre la reponse jusqu'au script qui l'a demandee.
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-refresh-token, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 app.use(express.json({ limit: '15mb' }));
 
 // ---------------------------------------------------------------------
@@ -249,6 +264,16 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// STAM V6 - lien personnel par conducteur (demande explicite de Laura
+// Peyre, 15/10/2026 : chaque conducteur doit voir SES contrats comme un
+// cockpit, pas une liste de tous les conducteurs). Meme fichier HTML : le
+// script cote client lit le slug dans l'URL et affiche directement le bon
+// conducteur, sans exposer les noms des autres. La liste de ces liens est
+// disponible dans le tableau de bord RH (authentifie).
+app.get('/c/:slug', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
 app.get('/dashboard', requireRhAuth, (req, res) => {
   res.sendFile(path.join(__dirname, 'dashboard.html'));
 });
@@ -263,6 +288,66 @@ app.get('/api/health', (req, res) => res.json({
   ok: true,
   dernierRafraichissement: served.data.genereLe,
 }));
+
+// ---------------------------------------------------------------------
+// Notification mail RH : un mail a RH a CHAQUE decision prise par un
+// conducteur, pour ne pas avoir a surveiller le tableau de bord en
+// permanence (demande explicite de Laura Peyre, 15/10/2026). Utilise
+// l'API Resend par simple appel HTTP (fetch natif de Node, aucune
+// dependance npm supplementaire a installer). Desactive silencieusement
+// si RESEND_API_KEY ou NOTIFY_EMAIL ne sont pas definis sur Render : une
+// decision reste toujours enregistree meme si le mail ne part pas, et
+// l'echec d'un envoi ne fait jamais echouer la decision elle-meme.
+// ---------------------------------------------------------------------
+function findItemByContrat(contrat) {
+  let found = null;
+  forEachFlatItem(served.dashboard, (item) => {
+    if (!found && String(item.contrat) === String(contrat)) found = item;
+  });
+  return found;
+}
+
+async function sendDecisionEmail(contrat, decisionInfo) {
+  const apiKey = process.env.RESEND_API_KEY;
+  const to = process.env.NOTIFY_EMAIL;
+  if (!apiKey || !to) return;
+  const item = findItemByContrat(contrat);
+  const lignes = [
+    `Contrat : ${contrat}`,
+    item ? `Interimaire : ${item.interimaire || '—'}` : null,
+    item ? `Chantier : ${item.chantier || '—'}` : null,
+    item ? `Conducteur : ${item.conducteur || '—'}` : null,
+    `Statut : ${DECISION_MAIL_LABELS[decisionInfo.statut] || decisionInfo.statut}`,
+    decisionInfo.nouvelleDateFin ? `Nouvelle date de fin demandee : ${decisionInfo.nouvelleDateFin}` : null,
+    decisionInfo.commentaire ? `Commentaire : ${decisionInfo.commentaire}` : null,
+    `Le : ${decisionInfo.valideLe}`,
+  ].filter(Boolean).join('\n');
+  try {
+    const resp = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'STAM Contrats <onboarding@resend.dev>',
+        to: [to],
+        subject: `Contrat ${contrat} : ${DECISION_MAIL_LABELS[decisionInfo.statut] || decisionInfo.statut}`,
+        text: lignes,
+      }),
+    });
+    if (!resp.ok) {
+      console.error('Resend a refuse le mail de notification :', resp.status, await resp.text());
+    }
+  } catch (err) {
+    console.error('Envoi mail de notification echoue :', err && err.message ? err.message : err);
+  }
+}
+
+const DECISION_MAIL_LABELS = {
+  valide: 'Valide',
+  refuse: 'Refuse',
+  prolonge: 'Prolongation demandee',
+  arrete: 'Arrete',
+  attente: 'Pas encore decide',
+};
 
 // ---------------------------------------------------------------------
 // Decision d'un conducteur (valider / refuser / prolonger / arreter /
@@ -287,6 +372,7 @@ app.post('/api/decision', (req, res) => {
   };
   writeJsonSafe(DECISIONS_FILE, decisions);
   rebuildServed();
+  sendDecisionEmail(contrat, decisions[String(contrat)]);
   res.json({ ok: true });
 });
 
@@ -297,10 +383,16 @@ app.post('/api/decision', (req, res) => {
 app.get('/api/conducteurs', requireRhAuth, (req, res) => {
   const seen = {};
   (served.dashboard.items || []).forEach((it) => {
-    if (!it.conducteur) return;
+    if (!it.conducteur || it.conducteur === 'rh') return; // 'rh' = non attribue, pas un vrai conducteur
     seen[it.conducteur] = it.conducteurMail || seen[it.conducteur] || null;
   });
-  const list = Object.keys(seen).map((nom) => ({ nom, mail: seen[nom] })).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+  // STAM V6 - le slug est renvoye ici aussi (identique a celui utilise comme
+  // cle dans data.conducteurs) pour que le tableau de bord RH puisse
+  // construire le lien personnel /c/<slug> de chaque conducteur, demande
+  // explicite de Laura Peyre le 15/10/2026.
+  const list = Object.keys(seen)
+    .map((nom) => ({ nom, mail: seen[nom], slug: slugify(nom) }))
+    .sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
   res.json({ conducteurs: list });
 });
 
