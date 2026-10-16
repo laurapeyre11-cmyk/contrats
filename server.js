@@ -58,6 +58,68 @@ function writeJsonSafe(file, obj) {
   fs.renameSync(tmp, file);
 }
 
+// ---------------------------------------------------------------------
+// Persistance Upstash (Redis gratuit, hors de Render) -- ajoute le
+// 16/10/2026 suite au constat de Laura Peyre : sur le plan gratuit de
+// Render, le disque du service est efface a chaque mise en veille pour
+// inactivite ("spin down"), donc tout ce qui n'est ecrit que sur disque
+// (data.json, dashboard.json, decisions.json, assignments.json) est perdu
+// des que le service se rendort puis redemarre. Upstash sert de coffre-fort
+// externe : a chaque ecriture on y envoie une copie (en plus du disque,
+// garde comme cache rapide pour le meme demarrage), et au demarrage du
+// serveur on recharge depuis Upstash en priorite -- donc les contrats et
+// decisions survivent desormais aux mises en veille. Si UPSTASH_REDIS_REST_URL
+// / UPSTASH_REDIS_REST_TOKEN ne sont pas definis, tout continue de fonctionner
+// comme avant (disque seul), simplement sans survivre a une mise en veille.
+// ---------------------------------------------------------------------
+const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+const KV_KEYS = {
+  data: 'stam:data',
+  dashboard: 'stam:dashboard',
+  decisions: 'stam:decisions',
+  assignments: 'stam:assignments',
+};
+
+function upstashEnabled() {
+  return !!(UPSTASH_URL && UPSTASH_TOKEN);
+}
+
+async function kvGet(key) {
+  if (!upstashEnabled()) return null;
+  try {
+    const resp = await fetch(UPSTASH_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(['GET', key]),
+    });
+    if (!resp.ok) {
+      console.error('Upstash GET refuse (' + key + ') :', resp.status);
+      return null;
+    }
+    const json = await resp.json();
+    return json && json.result != null ? json.result : null;
+  } catch (e) {
+    console.error('Upstash GET echoue (' + key + ') :', e && e.message ? e.message : e);
+    return null;
+  }
+}
+
+// Volontairement non-attendu (fire-and-forget) partout ou elle est appelee :
+// un echec d'ecriture Upstash (reseau, quota) ne doit jamais faire echouer
+// la decision/reattribution/rafraichissement elle-meme, qui reste de toute
+// facon ecrite sur disque dans le meme appel.
+function kvSet(key, valueObj) {
+  if (!upstashEnabled()) return;
+  fetch(UPSTASH_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(['SET', key, JSON.stringify(valueObj)]),
+  }).then((resp) => {
+    if (!resp.ok) console.error('Upstash SET refuse (' + key + ') :', resp.status);
+  }).catch((e) => console.error('Upstash SET echoue (' + key + ') :', e && e.message ? e.message : e));
+}
+
 const EMPTY_PUBLIC = { genereLe: '—', conducteurs: {}, echeances: {}, apercu: [], historique: [] };
 const EMPTY_DASHBOARD = { genereLe: '—', items: [], echeances: [], apercu: [] };
 
@@ -371,6 +433,7 @@ app.post('/api/decision', (req, res) => {
     nouvelleDateFin: decision === 'prolonger' ? (nouvelleDateFin || null) : undefined,
   };
   writeJsonSafe(DECISIONS_FILE, decisions);
+  kvSet(KV_KEYS.decisions, decisions);
   rebuildServed();
   sendDecisionEmail(contrat, decisions[String(contrat)]);
   res.json({ ok: true });
@@ -403,6 +466,7 @@ app.post('/api/reassign', requireRhAuth, (req, res) => {
   }
   assignments[String(contrat)] = { conducteur: String(conducteur).trim(), conducteurMail: conducteurMail ? String(conducteurMail).trim() : null };
   writeJsonSafe(ASSIGNMENTS_FILE, assignments);
+  kvSet(KV_KEYS.assignments, assignments);
   rebuildServed();
   res.json({ ok: true });
 });
@@ -431,10 +495,55 @@ app.post('/api/refresh', (req, res) => {
   rawDashboard = dashboard;
   writeJsonSafe(DATA_FILE, rawData);
   writeJsonSafe(DASHBOARD_FILE, rawDashboard);
+  kvSet(KV_KEYS.data, rawData);
+  kvSet(KV_KEYS.dashboard, rawDashboard);
   rebuildServed();
   res.json({ ok: true, genereLe: served.data.genereLe });
 });
 
-app.listen(PORT, () => {
-  console.log('STAM contrats interim - serveur demarre sur le port ' + PORT);
+// ---------------------------------------------------------------------
+// Demarrage : on a deja charge le disque local de maniere synchrone plus
+// haut (readJsonSafe), ce qui sert de repli immediat si Upstash n'est pas
+// configure ou ne repond pas. Si Upstash EST configure, on lui redonne la
+// priorite ici (il est la source la plus fraiche et la seule qui survit a
+// une mise en veille Render) avant d'ouvrir le port, pour ne jamais servir
+// une page vide par erreur a une premiere requete suivant un reveil.
+// ---------------------------------------------------------------------
+async function loadFromUpstashAtBoot() {
+  if (!upstashEnabled()) {
+    console.log('Upstash non configure : persistance disque uniquement (perdue a chaque mise en veille Render).');
+    return;
+  }
+  const [d, db, dec, asg] = await Promise.all([
+    kvGet(KV_KEYS.data),
+    kvGet(KV_KEYS.dashboard),
+    kvGet(KV_KEYS.decisions),
+    kvGet(KV_KEYS.assignments),
+  ]);
+  if (d) {
+    try { rawData = JSON.parse(d); writeJsonSafe(DATA_FILE, rawData); }
+    catch (e) { console.error('Upstash data illisible au demarrage :', e.message); }
+  }
+  if (db) {
+    try { rawDashboard = JSON.parse(db); writeJsonSafe(DASHBOARD_FILE, rawDashboard); }
+    catch (e) { console.error('Upstash dashboard illisible au demarrage :', e.message); }
+  }
+  if (dec) {
+    try { decisions = JSON.parse(dec); writeJsonSafe(DECISIONS_FILE, decisions); }
+    catch (e) { console.error('Upstash decisions illisibles au demarrage :', e.message); }
+  }
+  if (asg) {
+    try { assignments = JSON.parse(asg); writeJsonSafe(ASSIGNMENTS_FILE, assignments); }
+    catch (e) { console.error('Upstash assignments illisibles au demarrage :', e.message); }
+  }
+  rebuildServed();
+  console.log('Etat recharge depuis Upstash au demarrage.');
+}
+
+loadFromUpstashAtBoot().catch((e) => {
+  console.error('Chargement Upstash echoue au demarrage, on continue avec le disque local :', e && e.message ? e.message : e);
+}).then(() => {
+  app.listen(PORT, () => {
+    console.log('STAM contrats interim - serveur demarre sur le port ' + PORT);
+  });
 });
