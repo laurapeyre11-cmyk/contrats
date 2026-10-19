@@ -1,0 +1,793 @@
+<title>Tableau de bord intérim</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f1efe9; --surface:#ffffff; --surface-2:#f8f6f1; --border:#ddd8cc;
+  --fg:#211f1a; --fg-muted:#6b6557; --accent:#c9811f; --accent-ink:#2a1a04;
+  --good:#1f7a4d; --good-bg:#e7f3ec; --bad:#b4332a; --bad-bg:#fbeae8;
+  --info:#2d5f7c; --warn:#a8631b; --warn-bg:#f8ecda; --chip-bg:#eee9da; --focus:#2d5f7c;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#17160f; --surface:#211f17; --surface-2:#272419; --border:#3a3627;
+    --fg:#efece2; --fg-muted:#a39d89; --accent:#e3a63f; --accent-ink:#1c1304;
+    --good:#5fcf94; --good-bg:#15291f; --bad:#f0897f; --bad-bg:#2c1917;
+    --info:#7fb2d4; --warn:#e3a63f; --warn-bg:#2c2415; --chip-bg:#2c2919; --focus:#7fb2d4; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#17160f; --surface:#211f17; --surface-2:#272419; --border:#3a3627;
+  --fg:#efece2; --fg-muted:#a39d89; --accent:#e3a63f; --accent-ink:#1c1304;
+  --good:#5fcf94; --good-bg:#15291f; --bad:#f0897f; --bad-bg:#2c1917;
+  --info:#7fb2d4; --warn:#e3a63f; --warn-bg:#2c2415; --chip-bg:#2c2919; --focus:#7fb2d4; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{
+  background:var(--bg); color:var(--fg); font-family:"Public Sans",system-ui,sans-serif;
+  padding-left:max(16px, env(safe-area-inset-left,0px));
+  padding-right:max(16px, env(safe-area-inset-right,0px));
+}
+h1,h2,.display{font-family:"Archivo",system-ui,sans-serif; text-wrap:balance}
+.tabular{font-variant-numeric:tabular-nums}
+.wrap{max-width:1180px; margin:0 auto; padding-block:0 40px}
+
+header.top{position:sticky; top:env(safe-area-inset-top,0px); z-index:5; background:var(--bg); padding-block:14px 12px; border-bottom:1px solid var(--border)}
+.brand{display:flex; align-items:baseline; justify-content:space-between; gap:8px}
+.brand .mark{font-family:"Archivo"; font-weight:800; font-size:12px; letter-spacing:.14em; color:var(--accent)}
+.brand time{font-size:11px; color:var(--fg-muted)}
+h1{font-size:21px; font-weight:800; margin:6px 0 2px; line-height:1.15}
+.subtitle{font-size:12.5px; color:var(--fg-muted)}
+.priv-note{
+  margin-top:10px; background:var(--warn-bg); border:1px solid var(--border); border-radius:9px;
+  padding:9px 11px; font-size:12px; color:var(--warn); display:flex; gap:7px; align-items:flex-start;
+}
+.priv-note svg{flex:none; margin-top:1px}
+
+/* vue d'ensemble */
+.ov-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:9px; margin-top:16px}
+.ov-card{
+  background:var(--surface); border:1px solid var(--border); border-radius:11px; padding:12px 13px; min-width:0;
+}
+.ov-card .name{font-weight:700; font-size:13.5px; margin-bottom:7px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.ov-stats{display:flex; gap:10px}
+.ov-stats b{display:block; font-family:"Archivo"; font-size:16px; font-weight:700}
+.ov-stats span{font-size:9px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.03em}
+.ov-stats .wait b{color:var(--warn)}
+.ov-stats .ok b{color:var(--good)}
+.ov-stats .bad b{color:var(--bad)}
+.ov-card .vol{margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-size:11.5px; color:var(--fg-muted)}
+.ov-card .vol b{color:var(--fg); font-weight:700}
+
+/* tabs */
+.tabs{display:flex; gap:6px; margin-top:22px; flex-wrap:wrap}
+.tab{
+  padding:9px 14px; border-radius:8px; border:1px solid var(--border); background:var(--surface-2);
+  color:var(--fg-muted); font:600 12.5px "Public Sans"; cursor:pointer;
+}
+.tab[aria-selected="true"]{background:var(--fg); color:var(--bg); border-color:var(--fg)}
+.tab .count{font-size:10.5px; opacity:.75; margin-left:4px}
+
+/* filtres */
+.filters{display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; align-items:center}
+.filters select, .filters input{
+  font:500 13px "Public Sans"; padding:8px 10px; border-radius:8px; border:1px solid var(--border);
+  background:var(--surface); color:var(--fg);
+}
+.filters input{flex:1; min-width:140px}
+.filters .reset{
+  font:600 12.5px "Public Sans"; padding:8px 11px; border-radius:8px; border:1px solid var(--border);
+  background:var(--surface-2); color:var(--fg-muted); cursor:pointer;
+}
+.chips{display:flex; gap:6px; flex-wrap:wrap; margin-top:10px}
+.chipbtn{
+  padding:6px 11px; border-radius:999px; border:1px solid var(--border); background:var(--surface);
+  color:var(--fg-muted); font:600 11.5px "Public Sans"; cursor:pointer;
+}
+.chipbtn[aria-pressed="true"]{background:var(--accent); color:var(--accent-ink); border-color:var(--accent)}
+.result-count{font-size:12px; color:var(--fg-muted); margin-top:10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+
+/* table */
+.tablewrap{margin-top:10px; border:1px solid var(--border); border-radius:12px; overflow:auto; background:var(--surface)}
+table.datatable{border-collapse:collapse; width:100%; min-width:760px; font-size:12.5px}
+table.datatable th, table.datatable td{padding:9px 11px; text-align:left; white-space:nowrap}
+table.datatable td.wrap-cell{white-space:normal; min-width:160px}
+table.datatable thead th{
+  position:sticky; top:0; background:var(--surface-2); border-bottom:1px solid var(--border);
+  font:700 11px "Public Sans"; text-transform:uppercase; letter-spacing:.03em; color:var(--fg-muted);
+  cursor:pointer; user-select:none; white-space:nowrap;
+}
+table.datatable thead th:hover{color:var(--fg)}
+table.datatable thead th .arrow{opacity:0; margin-left:4px; font-size:10px}
+table.datatable thead th[data-active="true"]{color:var(--fg)}
+table.datatable thead th[data-active="true"] .arrow{opacity:1}
+table.datatable tbody tr{border-bottom:1px solid var(--border)}
+table.datatable tbody tr:last-child{border-bottom:none}
+table.datatable tbody tr:hover{background:var(--surface-2)}
+table.datatable tbody tr.unassigned{background:var(--warn-bg)}
+.badge{
+  font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
+  padding:3px 8px; border-radius:6px; white-space:nowrap; display:inline-block;
+}
+.badge.attente{background:var(--warn-bg); color:var(--warn)}
+.badge.valide{background:var(--good-bg); color:var(--good)}
+.badge.refuse{background:var(--bad-bg); color:var(--bad)}
+.badge.prolonge{background:var(--info); color:#fff}
+.badge.arrete{background:var(--bad); color:#fff}
+.badge.retard{background:var(--bad-bg); color:var(--bad)}
+.badge.proche{background:var(--warn-bg); color:var(--warn)}
+.comment-cell{font-style:italic; color:var(--fg-muted)}
+.cell-actions{display:flex; gap:6px; align-items:center; flex-wrap:nowrap}
+.cell-actions select{font:500 12px "Public Sans"; padding:5px 7px; border-radius:6px; border:1px solid var(--border); background:var(--surface); color:var(--fg); max-width:160px}
+.cell-actions button{font:600 11.5px "Public Sans"; padding:5px 9px; border-radius:6px; border:1px solid var(--accent); background:var(--accent); color:var(--accent-ink); cursor:pointer; white-space:nowrap}
+.cell-actions button:disabled{opacity:.6; cursor:default}
+.cell-actions .ok-msg{font-size:11px; color:var(--good); font-weight:600}
+.cell-actions.decision{flex-wrap:wrap; min-width:190px}
+.cell-actions.decision .dec-btn[data-decision="no"]{background:var(--surface); border-color:var(--bad); color:var(--bad)}
+.cell-actions.decision .dec-btn[data-decision="prolonger"],
+.cell-actions.decision .dec-btn[data-decision="arreter"]{background:var(--surface); border-color:var(--border); color:var(--fg-muted)}
+.cell-actions .dec-date{font:500 12px "Public Sans"; padding:4px 6px; border-radius:6px; border:1px solid var(--border); background:var(--surface); color:var(--fg)}
+.flag{font-size:10px; font-weight:700; color:var(--warn); text-transform:uppercase; letter-spacing:.02em}
+
+/* liens conducteurs : garde la presentation en cartes, pas une table */
+.rows{display:flex; flex-direction:column; gap:7px; margin-top:10px}
+.row{
+  background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:11px 12px;
+  display:grid; grid-template-columns:1fr auto; gap:6px 10px; min-width:0; align-items:center;
+}
+.row .main{min-width:0}
+.row .name{font-weight:700; font-size:14px}
+.link-row .url{font-size:12px; color:var(--fg-muted); margin-top:2px; word-break:break-all}
+.link-row button{font:600 12px "Public Sans"; padding:7px 12px; border-radius:7px; border:1px solid var(--accent); background:var(--accent); color:var(--accent-ink); cursor:pointer; white-space:nowrap}
+.link-row button.copied{border-color:var(--good); background:var(--good-bg); color:var(--good)}
+
+.empty{margin-top:18px; text-align:center; padding:30px 18px; border:1px dashed var(--border); border-radius:12px; color:var(--fg-muted); font-size:13px}
+[hidden]{display:none!important}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><span class="mark">STAM — Intérim · RH</span><time id="genTime"></time></div>
+    <h1>Tableau de bord contrats intérim</h1>
+    <div class="subtitle">Vue complète, avec montants — usage interne RH uniquement.</div>
+    <div class="priv-note">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z"/></svg>
+      Page privée (montants, salaires) : ne pas partager le lien avec les conducteurs. Eux ont leur propre page, sans ces chiffres.
+    </div>
+  </header>
+
+  <div class="ov-grid" id="ovGrid"></div>
+
+  <div class="tabs">
+    <button class="tab" id="tabItems" aria-selected="true">Contrats</button>
+    <button class="tab" id="tabSuivi" aria-selected="false">Suivi des décisions</button>
+    <button class="tab" id="tabEch" aria-selected="false">Échéances</button>
+    <button class="tab" id="tabLinks" aria-selected="false">Liens conducteurs</button>
+  </div>
+
+  <!-- Onglet Contrats : tous les contrats, filtrables et triables colonne par colonne -->
+  <main id="itemsView">
+    <div class="filters">
+      <select id="fConducteur"></select>
+      <select id="fChantier"></select>
+      <select id="fAgence"></select>
+      <input id="fSearch" type="text" placeholder="Chercher un nom, un n° de contrat…">
+      <button type="button" class="reset" id="fResetItems">Réinitialiser</button>
+    </div>
+    <div class="chips" id="fStatus">
+      <button class="chipbtn" data-v="tous" aria-pressed="true">Tous</button>
+      <button class="chipbtn" data-v="attente" aria-pressed="false">En attente</button>
+      <button class="chipbtn" data-v="valide" aria-pressed="false">Validés</button>
+      <button class="chipbtn" data-v="refuse" aria-pressed="false">Refusés</button>
+      <button class="chipbtn" data-v="prolonge" aria-pressed="false">Prolongations</button>
+      <button class="chipbtn" data-v="arrete" aria-pressed="false">Arrêts</button>
+    </div>
+    <div class="result-count"><span id="itemsCount"></span><button type="button" class="reset" id="itemsExport">Exporter en CSV</button></div>
+    <div class="tablewrap"><table class="datatable" id="itemsTable"><thead><tr></tr></thead><tbody></tbody></table></div>
+    <div class="empty" id="itemsEmpty" hidden>Aucun contrat ne correspond à ces filtres.</div>
+  </main>
+
+  <!-- Onglet Suivi : uniquement ce qui a ete decide, en ordre chronologique -->
+  <main id="suiviView" hidden>
+    <p class="subtitle" style="margin-top:14px">Chaque ligne = une décision prise par un conducteur sur sa page personnelle (ou par toi en réattribution). Triée par date de décision, la plus récente en premier par défaut.</p>
+    <div class="filters">
+      <select id="fConducteurSuivi"></select>
+      <select id="fChantierSuivi"></select>
+      <select id="fAgenceSuivi"></select>
+      <input id="fSearchSuivi" type="text" placeholder="Chercher un nom, un n° de contrat…">
+      <button type="button" class="reset" id="fResetSuivi">Réinitialiser</button>
+    </div>
+    <div class="chips" id="fDecisionSuivi">
+      <button class="chipbtn" data-v="tous" aria-pressed="true">Toutes décisions</button>
+      <button class="chipbtn" data-v="valide" aria-pressed="false">Validés</button>
+      <button class="chipbtn" data-v="refuse" aria-pressed="false">Refusés</button>
+      <button class="chipbtn" data-v="prolonge" aria-pressed="false">Prolongations</button>
+      <button class="chipbtn" data-v="arrete" aria-pressed="false">Arrêts</button>
+    </div>
+    <div class="result-count"><span id="suiviCount"></span><button type="button" class="reset" id="suiviExport">Exporter en CSV</button></div>
+    <div class="tablewrap"><table class="datatable" id="suiviTable"><thead><tr></tr></thead><tbody></tbody></table></div>
+    <div class="empty" id="suiviEmpty" hidden>Aucune décision ne correspond à ces filtres pour l'instant — dès qu'un conducteur valide, refuse, prolonge ou arrête un contrat, ça apparaît ici.</div>
+  </main>
+
+  <main id="echView" hidden>
+    <div class="filters">
+      <select id="fConducteurEch"></select>
+      <select id="fChantierEch"></select>
+      <select id="fAgenceEch"></select>
+      <input id="fSearchEch" type="text" placeholder="Chercher un nom, un chantier…">
+      <button type="button" class="reset" id="fResetEch">Réinitialiser</button>
+    </div>
+    <div class="result-count" id="echCount"></div>
+    <div class="tablewrap"><table class="datatable" id="echTable"><thead><tr></tr></thead><tbody></tbody></table></div>
+    <div class="empty" id="echEmpty" hidden>Aucune échéance ne correspond à ces filtres.</div>
+  </main>
+
+  <main id="linksView" hidden>
+    <p class="subtitle" style="margin-top:14px">Le lien personnel de chaque conducteur — à lui transmettre (SMS, en main propre…). Il atterrit directement sur ses contrats, sans voir ceux des autres.</p>
+    <div class="rows" id="linksRows" style="margin-top:12px"></div>
+    <div class="empty" id="linksEmpty" hidden>Aucun conducteur identifié pour l'instant.</div>
+  </main>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var DATA = null;
+  var lastItemsFiltered = [];
+  var lastSuiviFiltered = [];
+  var CONDUCTEURS = []; // [{nom, mail}] pour le menu de réattribution, charge depuis /api/conducteurs
+  var STATUT_LABELS = {attente:'En attente', valide:'Validé', refuse:'Refusé', prolonge:'Prolongation', arrete:'Arrêt confirmé'};
+
+  function esc(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function num(v){ if (v === null || v === undefined) return '—'; return v.toFixed(2).replace('.', ',') + ' €/h'; }
+  function euro0(v){ return Math.round(v).toLocaleString('fr-FR') + ' €'; }
+
+  function fillSelect(sel, noms, allLabel){
+    var prev = sel.value;
+    sel.innerHTML = '<option value="tous">' + allLabel + '</option>' +
+      noms.map(function(n){ return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('');
+    if (prev && noms.indexOf(prev) !== -1) sel.value = prev;
+  }
+
+  function parseFR(d){
+    if (!d) return 0;
+    var p = d.split('/');
+    return p.length === 3 ? Date.UTC(+p[2], +p[1]-1, +p[0]) : 0;
+  }
+
+  function matchSearch(hay, needle){
+    if (!needle) return true;
+    return hay.toLowerCase().indexOf(needle.toLowerCase()) !== -1;
+  }
+
+  // Export CSV (Excel-compatible : séparateur point-virgule, BOM UTF-8
+  // pour les accents) de ce qui est actuellement affiché — donc déjà
+  // filtré et trié comme sur l'écran au moment du clic.
+  function exportCsv(columns, rows, filename){
+    var sep = ';';
+    function cell(v){
+      var s = String(v == null ? '' : v).replace(/"/g, '""');
+      return /[;"\n]/.test(s) ? '"' + s + '"' : s;
+    }
+    var lines = [columns.map(function(c){ return cell(c.label); }).join(sep)];
+    rows.forEach(function(it){
+      lines.push(columns.map(function(c){ return cell(c.get(it)); }).join(sep));
+    });
+    var blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+  }
+
+  // ------------------------------------------------------------------
+  // Mini-moteur de table triable : chaque colonne declare comment lire
+  // sa valeur (get) et comment la comparer (type: 'text' | 'num' | 'date').
+  // Cliquer un en-tete trie par cette colonne ; re-cliquer inverse le sens.
+  // ------------------------------------------------------------------
+  function makeSortableTable(tableEl, columns, state){
+    var thead = tableEl.querySelector('thead tr');
+    thead.innerHTML = columns.map(function(c, i){
+      return '<th data-i="' + i + '">' + esc(c.label) + '<span class="arrow"></span></th>';
+    }).join('');
+    Array.prototype.forEach.call(thead.querySelectorAll('th'), function(th, i){
+      if (columns[i].noSort) return;
+      th.addEventListener('click', function(){
+        if (state.sortKey === i) state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+        else { state.sortKey = i; state.sortDir = columns[i].defaultDir || 'asc'; }
+        state.render();
+      });
+    });
+  }
+  function paintSortHeaders(tableEl, columns, state){
+    Array.prototype.forEach.call(tableEl.querySelectorAll('thead th'), function(th, i){
+      var active = state.sortKey === i;
+      th.setAttribute('data-active', String(active));
+      th.querySelector('.arrow').textContent = active ? (state.sortDir === 'asc' ? '▲' : '▼') : '▲';
+    });
+  }
+  function sortByColumn(list, columns, state){
+    var col = columns[state.sortKey];
+    if (!col) return list;
+    var copy = list.slice();
+    var dir = state.sortDir === 'desc' ? -1 : 1;
+    copy.sort(function(a, b){
+      var va = col.get(a), vb = col.get(b);
+      var cmp;
+      if (col.type === 'num') cmp = (va||0) - (vb||0);
+      else if (col.type === 'date') cmp = parseFR(va) - parseFR(vb);
+      else cmp = String(va||'').localeCompare(String(vb||''), 'fr');
+      return cmp * dir;
+    });
+    return copy;
+  }
+
+  function assignCellHtml(it){
+    var unassigned = it.conducteur === 'rh';
+    var options = CONDUCTEURS.map(function(c){
+      return '<option value="' + esc(c.nom) + '" data-mail="' + esc(c.mail||'') + '"' + (c.nom === it.conducteur ? ' selected' : '') + '>' + esc(c.nom) + '</option>';
+    }).join('');
+    return '<div class="cell-actions" data-contrat="' + esc(it.contrat) + '">' +
+      (unassigned ? '<span class="flag">À attribuer</span>' : '') +
+      '<select class="assign-select">' + options + '</select>' +
+      '<button class="assign-btn">Attribuer</button>' +
+      '<span class="ok-msg" hidden>✓</span>' +
+    '</div>';
+  }
+  function wireAssignCell(container, it, onDone){
+    var box = container.querySelector('.cell-actions[data-contrat="' + String(it.contrat).replace(/"/g,'') + '"]');
+    if (!box) return;
+    var btn = box.querySelector('.assign-btn');
+    var sel = box.querySelector('.assign-select');
+    var okMsg = box.querySelector('.ok-msg');
+    btn.addEventListener('click', function(){
+      var opt = sel.options[sel.selectedIndex];
+      if (!opt) return;
+      btn.disabled = true;
+      fetch('/api/reassign', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ contrat: it.contrat, conducteur: opt.value, conducteurMail: opt.getAttribute('data-mail') || null })
+      }).then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+        .then(function(){
+          it.conducteur = opt.value;
+          okMsg.hidden = false;
+          btn.disabled = false;
+          setTimeout(function(){ if (typeof onDone === 'function') onDone(); }, 500);
+        }).catch(function(){
+          btn.disabled = false;
+          okMsg.textContent = 'Échec';
+          okMsg.hidden = false;
+        });
+    });
+  }
+
+  // Décision directe depuis le tableau de bord (valider/refuser/prolonger/
+  // arrêter) : même API /api/decision que la page personnelle du
+  // conducteur. Demandé explicitement par Laura le 16/10 pour pouvoir
+  // décider elle-même, en plus de l'attribution.
+  function decisionCellHtml(it){
+    if (it.statut !== 'attente'){
+      return '<span class="badge ' + it.statut + '">' + (STATUT_LABELS[it.statut] || it.statut) + '</span>' +
+        (it.statut === 'prolonge' && it.nouvelleDateFin ? '<div class="comment-cell">Nouvelle fin : ' + esc(it.nouvelleDateFin) + '</div>' : '') +
+        (it.commentaire ? '<div class="comment-cell">“' + esc(it.commentaire) + '”</div>' : '');
+    }
+    return '<div class="cell-actions decision" data-contrat="' + esc(it.contrat) + '">' +
+      '<button class="dec-btn" data-decision="ok" title="Valider">✓ Valider</button>' +
+      '<button class="dec-btn" data-decision="no" title="Refuser">✕ Refuser</button>' +
+      '<button class="dec-btn" data-decision="prolonger" title="Prolonger">⏩</button>' +
+      '<button class="dec-btn" data-decision="arreter" title="Arrêter">⏹</button>' +
+      '<input type="date" class="dec-date" hidden>' +
+      '<span class="ok-msg" hidden></span>' +
+    '</div>';
+  }
+  function wireDecisionCell(container, it, onDone){
+    var box = container.querySelector('.cell-actions.decision[data-contrat="' + String(it.contrat).replace(/"/g,'') + '"]');
+    if (!box) return;
+    var dateInput = box.querySelector('.dec-date');
+    var okMsg = box.querySelector('.ok-msg');
+    var buttons = box.querySelectorAll('.dec-btn');
+    function submit(decision, nouvelleDateFin){
+      Array.prototype.forEach.call(buttons, function(b){ b.disabled = true; });
+      fetch('/api/decision', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ contrat: it.contrat, decision: decision, nouvelleDateFin: nouvelleDateFin || null })
+      }).then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+        .then(function(){ if (typeof onDone === 'function') onDone(); })
+        .catch(function(){
+          Array.prototype.forEach.call(buttons, function(b){ b.disabled = false; });
+          okMsg.textContent = 'Échec — réessayez';
+          okMsg.hidden = false;
+        });
+    }
+    // Refuser et Arrêter sont irréversibles depuis cette vue (pas de
+    // bouton "annuler" ensuite) : un premier clic demande confirmation
+    // ("Sûr ?"), le second dans les 4 secondes valide vraiment. Valider et
+    // Prolonger restent à un clic (Prolonger ouvre juste le champ date).
+    var confirming = null;
+    Array.prototype.forEach.call(buttons, function(btn){
+      var original = btn.textContent;
+      btn.addEventListener('click', function(){
+        var decision = btn.getAttribute('data-decision');
+        if (decision === 'prolonger'){
+          if (dateInput.hidden){ dateInput.hidden = false; dateInput.focus(); return; }
+          if (!dateInput.value){ okMsg.textContent = 'Choisis une date'; okMsg.hidden = false; return; }
+          var p = dateInput.value.split('-');
+          submit('prolonger', p[2] + '/' + p[1] + '/' + p[0]);
+          return;
+        }
+        if (decision === 'no' || decision === 'arreter'){
+          if (confirming !== btn){
+            confirming = btn;
+            btn.textContent = 'Sûr ? Reclique';
+            setTimeout(function(){ if (confirming === btn){ confirming = null; btn.textContent = original; } }, 4000);
+            return;
+          }
+          confirming = null;
+          btn.textContent = original;
+        }
+        submit(decision);
+      });
+    });
+  }
+
+  // -------------------------- Onglet Contrats ------------------------
+  var fConducteur = document.getElementById('fConducteur');
+  var fChantier = document.getElementById('fChantier');
+  var fAgence = document.getElementById('fAgence');
+  var fSearch = document.getElementById('fSearch');
+  var statusFilter = 'tous';
+  var itemsState = { sortKey: 0, sortDir: 'asc', render: renderItems };
+  var ITEMS_COLUMNS = [
+    { label: 'Contrat', type: 'text', get: function(it){ return it.contrat; } },
+    { label: 'Intérimaire', type: 'text', get: function(it){ return it.interimaire; } },
+    { label: 'Agence', type: 'text', get: function(it){ return it.agence; } },
+    { label: 'Chantier', type: 'text', get: function(it){ return it.chantier; } },
+    { label: 'Conducteur', type: 'text', get: function(it){ return it.conducteur; } },
+    { label: 'Début', type: 'date', get: function(it){ return it.debutMission; } },
+    { label: 'Fin ferme', type: 'date', get: function(it){ return it.finFerme; } },
+    { label: 'Salaire', type: 'num', get: function(it){ return it.salaire; } },
+    { label: 'Facturé', type: 'num', get: function(it){ return it.tarifFacture; } },
+    { label: 'THM 42h', type: 'num', get: function(it){ return it.thm42; } },
+    { label: 'Statut / Décision', type: 'text', get: function(it){ return it.statut; } },
+    { label: 'Attribution', type: 'text', get: function(){ return ''; }, noSort: true },
+  ];
+  document.querySelectorAll('#fStatus .chipbtn').forEach(function(b){
+    b.addEventListener('click', function(){
+      document.querySelectorAll('#fStatus .chipbtn').forEach(function(x){ x.setAttribute('aria-pressed', String(x === b)); });
+      statusFilter = b.getAttribute('data-v');
+      renderItems();
+    });
+  });
+  [fConducteur, fChantier, fAgence].forEach(function(s){ s.addEventListener('change', renderItems); });
+  fSearch.addEventListener('input', renderItems);
+  var ITEMS_CSV_COLUMNS = [
+    { label: 'Contrat', get: function(it){ return it.contrat; } },
+    { label: 'Intérimaire', get: function(it){ return it.interimaire; } },
+    { label: 'Agence', get: function(it){ return it.agence; } },
+    { label: 'Chantier', get: function(it){ return it.chantier; } },
+    { label: 'Conducteur', get: function(it){ return it.conducteur; } },
+    { label: 'Qualification', get: function(it){ return it.qualification; } },
+    { label: 'Début mission', get: function(it){ return it.debutMission; } },
+    { label: 'Fin ferme', get: function(it){ return it.finFerme; } },
+    { label: 'Salaire EUR/h', get: function(it){ return it.salaire; } },
+    { label: 'Tarif facturé EUR/h', get: function(it){ return it.tarifFacture; } },
+    { label: 'THM 42h', get: function(it){ return it.thm42; } },
+    { label: 'THM 39h', get: function(it){ return it.thm39; } },
+    { label: 'Statut', get: function(it){ return STATUT_LABELS[it.statut] || it.statut; } },
+    { label: 'Commentaire', get: function(it){ return it.commentaire; } },
+  ];
+  document.getElementById('itemsExport').addEventListener('click', function(){
+    exportCsv(ITEMS_CSV_COLUMNS, lastItemsFiltered, 'contrats_' + (DATA ? DATA.genereLe.replace(/\//g,'-') : 'export') + '.csv');
+  });
+  document.getElementById('fResetItems').addEventListener('click', function(){
+    fConducteur.value = 'tous'; fChantier.value = 'tous'; fAgence.value = 'tous'; fSearch.value = '';
+    statusFilter = 'tous';
+    document.querySelectorAll('#fStatus .chipbtn').forEach(function(x){ x.setAttribute('aria-pressed', String(x.getAttribute('data-v') === 'tous')); });
+    renderItems();
+  });
+
+  function itemRowHtml(it){
+    var unassigned = it.conducteur === 'rh';
+    return '<tr' + (unassigned ? ' class="unassigned"' : '') + '>' +
+      '<td class="tabular">' + esc(it.contrat) + '</td>' +
+      '<td>' + esc(it.interimaire) + '</td>' +
+      '<td>' + esc(it.agence || '—') + '</td>' +
+      '<td class="wrap-cell">' + esc(it.chantier || '—') + '</td>' +
+      '<td>' + esc(it.conducteur) + '</td>' +
+      '<td class="tabular">' + esc(it.debutMission || '—') + '</td>' +
+      '<td class="tabular">' + esc(it.finFerme || '—') + '</td>' +
+      '<td class="tabular">' + num(it.salaire) + '</td>' +
+      '<td class="tabular">' + num(it.tarifFacture) + '</td>' +
+      '<td class="tabular">' + num(it.thm42) + '</td>' +
+      '<td>' + decisionCellHtml(it) + '</td>' +
+      '<td>' + assignCellHtml(it) + '</td>' +
+    '</tr>';
+  }
+
+  function renderItems(){
+    var cond = fConducteur.value, chant = fChantier.value, ag = fAgence.value, q = fSearch.value.trim();
+    var filtered = DATA.items.filter(function(it){
+      if (statusFilter !== 'tous' && it.statut !== statusFilter) return false;
+      if (cond !== 'tous' && it.conducteur !== cond) return false;
+      if (chant !== 'tous' && it.chantier !== chant) return false;
+      if (ag !== 'tous' && it.agence !== ag) return false;
+      if (q && !matchSearch([it.interimaire, it.contrat, it.chantier, it.conducteur, it.agence].join(' '), q)) return false;
+      return true;
+    });
+    filtered = sortByColumn(filtered, ITEMS_COLUMNS, itemsState);
+    lastItemsFiltered = filtered;
+    document.getElementById('itemsCount').textContent = filtered.length + ' contrat(s)';
+    var table = document.getElementById('itemsTable');
+    table.querySelector('tbody').innerHTML = filtered.map(itemRowHtml).join('');
+    paintSortHeaders(table, ITEMS_COLUMNS, itemsState);
+    filtered.forEach(function(it){
+      wireAssignCell(table.querySelector('tbody'), it, function(){ renderItems(); renderEch(); });
+      wireDecisionCell(table.querySelector('tbody'), it, refreshData);
+    });
+    document.getElementById('itemsEmpty').hidden = filtered.length !== 0;
+  }
+
+  // Une décision change le statut (donc les compteurs de la vue d'ensemble
+  // et l'onglet Suivi) : on relit /api/dashboard.json plutôt que de
+  // retoucher l'objet localement, pour être sûr que tout reste cohérent.
+  function refreshData(){
+    fetch('/api/dashboard.json').then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function(data){ boot(data); })
+      .catch(function(){ renderItems(); });
+  }
+
+  // -------------------------- Onglet Suivi (historique des décisions) --
+  var fConducteurSuivi = document.getElementById('fConducteurSuivi');
+  var fChantierSuivi = document.getElementById('fChantierSuivi');
+  var fAgenceSuivi = document.getElementById('fAgenceSuivi');
+  var fSearchSuivi = document.getElementById('fSearchSuivi');
+  var decisionFilter = 'tous';
+  var suiviState = { sortKey: 0, sortDir: 'desc', render: renderSuivi };
+  var SUIVI_COLUMNS = [
+    { label: 'Décidé le', type: 'date', get: function(it){ return it.valideLe; }, defaultDir: 'desc' },
+    { label: 'Contrat', type: 'text', get: function(it){ return it.contrat; } },
+    { label: 'Intérimaire', type: 'text', get: function(it){ return it.interimaire; } },
+    { label: 'Agence', type: 'text', get: function(it){ return it.agence; } },
+    { label: 'Chantier', type: 'text', get: function(it){ return it.chantier; } },
+    { label: 'Conducteur', type: 'text', get: function(it){ return it.conducteur; } },
+    { label: 'Décision', type: 'text', get: function(it){ return it.statut; } },
+    { label: 'Détail', type: 'text', get: function(it){ return it.commentaire || ''; } },
+  ];
+  document.querySelectorAll('#fDecisionSuivi .chipbtn').forEach(function(b){
+    b.addEventListener('click', function(){
+      document.querySelectorAll('#fDecisionSuivi .chipbtn').forEach(function(x){ x.setAttribute('aria-pressed', String(x === b)); });
+      decisionFilter = b.getAttribute('data-v');
+      renderSuivi();
+    });
+  });
+  [fConducteurSuivi, fChantierSuivi, fAgenceSuivi].forEach(function(s){ s.addEventListener('change', renderSuivi); });
+  fSearchSuivi.addEventListener('input', renderSuivi);
+  var SUIVI_CSV_COLUMNS = [
+    { label: 'Décidé le', get: function(it){ return it.valideLe; } },
+    { label: 'Contrat', get: function(it){ return it.contrat; } },
+    { label: 'Intérimaire', get: function(it){ return it.interimaire; } },
+    { label: 'Agence', get: function(it){ return it.agence; } },
+    { label: 'Chantier', get: function(it){ return it.chantier; } },
+    { label: 'Conducteur', get: function(it){ return it.conducteur; } },
+    { label: 'Décision', get: function(it){ return STATUT_LABELS[it.statut] || it.statut; } },
+    { label: 'Nouvelle date de fin', get: function(it){ return it.nouvelleDateFin; } },
+    { label: 'Commentaire', get: function(it){ return it.commentaire; } },
+  ];
+  document.getElementById('suiviExport').addEventListener('click', function(){
+    exportCsv(SUIVI_CSV_COLUMNS, lastSuiviFiltered, 'suivi_decisions_' + (DATA ? DATA.genereLe.replace(/\//g,'-') : 'export') + '.csv');
+  });
+  document.getElementById('fResetSuivi').addEventListener('click', function(){
+    fConducteurSuivi.value = 'tous'; fChantierSuivi.value = 'tous'; fAgenceSuivi.value = 'tous'; fSearchSuivi.value = '';
+    decisionFilter = 'tous';
+    document.querySelectorAll('#fDecisionSuivi .chipbtn').forEach(function(x){ x.setAttribute('aria-pressed', String(x.getAttribute('data-v') === 'tous')); });
+    renderSuivi();
+  });
+
+  function suiviRowHtml(it){
+    return '<tr>' +
+      '<td class="tabular">' + esc(it.valideLe || '—') + '</td>' +
+      '<td class="tabular">' + esc(it.contrat) + '</td>' +
+      '<td>' + esc(it.interimaire) + '</td>' +
+      '<td>' + esc(it.agence || '—') + '</td>' +
+      '<td class="wrap-cell">' + esc(it.chantier || '—') + '</td>' +
+      '<td>' + esc(it.conducteur) + '</td>' +
+      '<td><span class="badge ' + it.statut + '">' + (STATUT_LABELS[it.statut] || it.statut) + '</span>' +
+        (it.statut === 'prolonge' && it.nouvelleDateFin ? '<div class="comment-cell">Nouvelle fin : ' + esc(it.nouvelleDateFin) + '</div>' : '') + '</td>' +
+      '<td class="wrap-cell comment-cell">' + (it.commentaire ? '“' + esc(it.commentaire) + '”' : '—') + '</td>' +
+    '</tr>';
+  }
+
+  function renderSuivi(){
+    var cond = fConducteurSuivi.value, chant = fChantierSuivi.value, ag = fAgenceSuivi.value, q = fSearchSuivi.value.trim();
+    var decided = DATA.items.filter(function(it){ return it.statut !== 'attente'; });
+    var filtered = decided.filter(function(it){
+      if (decisionFilter !== 'tous' && it.statut !== decisionFilter) return false;
+      if (cond !== 'tous' && it.conducteur !== cond) return false;
+      if (chant !== 'tous' && it.chantier !== chant) return false;
+      if (ag !== 'tous' && it.agence !== ag) return false;
+      if (q && !matchSearch([it.interimaire, it.contrat, it.chantier, it.conducteur, it.agence].join(' '), q)) return false;
+      return true;
+    });
+    filtered = sortByColumn(filtered, SUIVI_COLUMNS, suiviState);
+    lastSuiviFiltered = filtered;
+    document.getElementById('suiviCount').textContent = filtered.length + ' décision(s) sur ' + decided.length + ' au total';
+    var table = document.getElementById('suiviTable');
+    table.querySelector('tbody').innerHTML = filtered.map(suiviRowHtml).join('');
+    paintSortHeaders(table, SUIVI_COLUMNS, suiviState);
+    document.getElementById('suiviEmpty').hidden = filtered.length !== 0;
+  }
+
+  // -------------------------- Onglet Échéances -------------------------
+  var fConducteurEch = document.getElementById('fConducteurEch');
+  var fChantierEch = document.getElementById('fChantierEch');
+  var fAgenceEch = document.getElementById('fAgenceEch');
+  var fSearchEch = document.getElementById('fSearchEch');
+  var echState = { sortKey: 5, sortDir: 'asc', render: renderEch };
+  var ECH_COLUMNS = [
+    { label: 'Contrat', type: 'text', get: function(it){ return it.contrat; } },
+    { label: 'Intérimaire', type: 'text', get: function(it){ return it.interimaire; } },
+    { label: 'Agence', type: 'text', get: function(it){ return it.agence; } },
+    { label: 'Chantier', type: 'text', get: function(it){ return it.chantier; } },
+    { label: 'Conducteur', type: 'text', get: function(it){ return it.conducteur; } },
+    { label: 'Fin ferme', type: 'date', get: function(it){ return it.finFerme; } },
+    { label: 'Salaire', type: 'num', get: function(it){ return it.salaire; } },
+    { label: 'Facturé', type: 'num', get: function(it){ return it.tarifFacture; } },
+    { label: '', type: 'text', get: function(){ return ''; }, noSort: true },
+  ];
+  [fConducteurEch, fChantierEch, fAgenceEch].forEach(function(s){ s.addEventListener('change', renderEch); });
+  fSearchEch.addEventListener('input', renderEch);
+  document.getElementById('fResetEch').addEventListener('click', function(){
+    fConducteurEch.value = 'tous'; fChantierEch.value = 'tous'; fAgenceEch.value = 'tous'; fSearchEch.value = '';
+    renderEch();
+  });
+
+  function echRowHtml(it){
+    var cls = it.enRetard ? 'retard' : (it.joursRestants <= 7 ? 'proche' : '');
+    var label = it.enRetard ? 'Dépassée' : ('J-' + it.joursRestants);
+    return '<tr' + (it.conducteur === 'rh' ? ' class="unassigned"' : '') + '>' +
+      '<td class="tabular">' + esc(it.contrat) + '</td>' +
+      '<td>' + esc(it.interimaire) + '</td>' +
+      '<td>' + esc(it.agence || '—') + '</td>' +
+      '<td class="wrap-cell">' + esc(it.chantier || '—') + '</td>' +
+      '<td>' + esc(it.conducteur) + '</td>' +
+      '<td class="tabular">' + esc(it.finFerme || '—') + (cls ? ' <span class="badge ' + cls + '">' + label + '</span>' : ' <span class="badge">' + label + '</span>') + '</td>' +
+      '<td class="tabular">' + num(it.salaire) + '</td>' +
+      '<td class="tabular">' + num(it.tarifFacture) + '</td>' +
+      '<td>' + assignCellHtml(it) + '</td>' +
+    '</tr>';
+  }
+
+  function renderEch(){
+    var cond = fConducteurEch.value, chant = fChantierEch.value, ag = fAgenceEch.value, q = fSearchEch.value.trim();
+    var filtered = DATA.echeances.filter(function(it){
+      if (cond !== 'tous' && it.conducteur !== cond) return false;
+      if (chant !== 'tous' && it.chantier !== chant) return false;
+      if (ag !== 'tous' && it.agence !== ag) return false;
+      if (q && !matchSearch([it.interimaire, it.contrat, it.chantier, it.conducteur, it.agence].join(' '), q)) return false;
+      return true;
+    });
+    filtered = sortByColumn(filtered, ECH_COLUMNS, echState);
+    document.getElementById('echCount').textContent = filtered.length + ' échéance(s)';
+    var table = document.getElementById('echTable');
+    table.querySelector('tbody').innerHTML = filtered.map(echRowHtml).join('');
+    paintSortHeaders(table, ECH_COLUMNS, echState);
+    filtered.forEach(function(it){ wireAssignCell(table.querySelector('tbody'), it, function(){ renderItems(); renderEch(); }); });
+    document.getElementById('echEmpty').hidden = filtered.length !== 0;
+  }
+
+  function showDashTab(which){
+    document.getElementById('tabItems').setAttribute('aria-selected', String(which === 'items'));
+    document.getElementById('tabSuivi').setAttribute('aria-selected', String(which === 'suivi'));
+    document.getElementById('tabEch').setAttribute('aria-selected', String(which === 'ech'));
+    document.getElementById('tabLinks').setAttribute('aria-selected', String(which === 'links'));
+    document.getElementById('itemsView').hidden = which !== 'items';
+    document.getElementById('suiviView').hidden = which !== 'suivi';
+    document.getElementById('echView').hidden = which !== 'ech';
+    document.getElementById('linksView').hidden = which !== 'links';
+  }
+  document.getElementById('tabItems').addEventListener('click', function(){ showDashTab('items'); });
+  document.getElementById('tabSuivi').addEventListener('click', function(){ showDashTab('suivi'); });
+  document.getElementById('tabEch').addEventListener('click', function(){ showDashTab('ech'); });
+  document.getElementById('tabLinks').addEventListener('click', function(){ showDashTab('links'); });
+
+  // STAM V6 - lien personnel par conducteur (/c/<slug>), demande explicite
+  // de Laura Peyre le 15/10/2026 : chaque conducteur doit voir SES contrats
+  // comme un cockpit, plus de liste publique de tous les conducteurs. RH
+  // recupere ici le lien de chacun pour le lui transmettre.
+  function renderLinks(){
+    var container = document.getElementById('linksRows');
+    var empty = document.getElementById('linksEmpty');
+    if (!CONDUCTEURS.length){
+      container.innerHTML = '';
+      empty.hidden = false;
+      return;
+    }
+    empty.hidden = true;
+    var base = window.location.origin;
+    container.innerHTML = CONDUCTEURS.map(function(c){
+      var url = base + '/c/' + encodeURIComponent(c.slug);
+      return '<div class="row link-row" data-url="' + esc(url) + '">' +
+        '<div class="main"><div class="name">' + esc(c.nom) + '</div><div class="url">' + esc(url) + '</div></div>' +
+        '<button type="button">Copier</button>' +
+      '</div>';
+    }).join('');
+    Array.prototype.forEach.call(container.querySelectorAll('.link-row'), function(row){
+      var btn = row.querySelector('button');
+      var url = row.getAttribute('data-url');
+      btn.addEventListener('click', function(){
+        function done(){ btn.textContent = 'Copié'; btn.classList.add('copied'); setTimeout(function(){ btn.textContent = 'Copier'; btn.classList.remove('copied'); }, 1800); }
+        if (navigator.clipboard && navigator.clipboard.writeText){
+          navigator.clipboard.writeText(url).then(done).catch(function(){ window.prompt('Copiez ce lien :', url); });
+        } else {
+          window.prompt('Copiez ce lien :', url);
+        }
+      });
+    });
+  }
+
+  function boot(data){
+    DATA = data;
+    document.getElementById('genTime').textContent = "maj " + DATA.genereLe;
+
+    var volumeParConducteur = {};
+    DATA.items.forEach(function(it){
+      if (it.statut !== 'attente') return;
+      var v = (it.tarifFacture || 0) * (it.heuresSemaine || 0);
+      volumeParConducteur[it.conducteur] = (volumeParConducteur[it.conducteur] || 0) + v;
+    });
+    document.getElementById('ovGrid').innerHTML = DATA.apercu.map(function(c){
+      var vol = volumeParConducteur[c.nom] || 0;
+      return '<div class="ov-card">' +
+        '<div class="name">' + esc(c.nom) + '</div>' +
+        '<div class="ov-stats">' +
+          '<div class="wait"><b class="tabular">' + c.enAttente + '</b><span>Attente</span></div>' +
+          '<div class="ok"><b class="tabular">' + c.valides + '</b><span>Validés</span></div>' +
+          '<div class="bad"><b class="tabular">' + c.refuses + '</b><span>Refusés</span></div>' +
+        '</div>' +
+        '<div class="vol">Volume hebdo facturé (en attente) : <b>' + euro0(vol) + '</b></div>' +
+      '</div>';
+    }).join('');
+
+    var nomsConducteurs = DATA.apercu.map(function(c){ return c.nom; });
+    [fConducteur, fConducteurSuivi, fConducteurEch].forEach(function(s){ fillSelect(s, nomsConducteurs, 'Tous les conducteurs'); });
+
+    var chantiersUniques = Array.from(new Set(DATA.items.map(function(it){ return it.chantier; }).filter(Boolean))).sort(function(a,b){ return a.localeCompare(b,'fr'); });
+    [fChantier, fChantierSuivi, fChantierEch].forEach(function(s){ fillSelect(s, chantiersUniques, 'Tous les chantiers'); });
+
+    var agencesUniques = Array.from(new Set(DATA.items.map(function(it){ return it.agence; }).filter(Boolean))).sort(function(a,b){ return a.localeCompare(b,'fr'); });
+    [fAgence, fAgenceSuivi, fAgenceEch].forEach(function(s){ fillSelect(s, agencesUniques, 'Toutes les agences'); });
+
+    var decidedCount = DATA.items.filter(function(it){ return it.statut !== 'attente'; }).length;
+    document.getElementById('tabSuivi').innerHTML = 'Suivi des décisions<span class="count">(' + decidedCount + ')</span>';
+
+    makeSortableTable(document.getElementById('itemsTable'), ITEMS_COLUMNS, itemsState);
+    makeSortableTable(document.getElementById('suiviTable'), SUIVI_COLUMNS, suiviState);
+    makeSortableTable(document.getElementById('echTable'), ECH_COLUMNS, echState);
+
+    renderItems();
+    renderSuivi();
+    renderEch();
+    renderLinks();
+  }
+
+  Promise.all([
+    fetch('/api/dashboard.json').then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); }),
+    fetch('/api/conducteurs').then(function(r){ return r.ok ? r.json() : {conducteurs:[]}; }).catch(function(){ return {conducteurs:[]}; })
+  ]).then(function(results){
+    CONDUCTEURS = results[1].conducteurs || [];
+    boot(results[0]);
+  }).catch(function(e){
+    document.querySelector('.wrap').innerHTML =
+      '<div class="empty" style="margin-top:60px">Données indisponibles pour le moment. Réessayez dans une minute.</div>';
+  });
+})();
+</script>
