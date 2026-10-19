@@ -105,26 +105,61 @@ async function kvGet(key) {
   }
 }
 
-// Volontairement non-attendu (fire-and-forget) partout ou elle est appelee :
-// un echec d'ecriture Upstash (reseau, quota) ne doit jamais faire echouer
-// la decision/reattribution/rafraichissement elle-meme, qui reste de toute
-// facon ecrite sur disque dans le meme appel.
-function kvSet(key, valueObj) {
-  if (!upstashEnabled()) return;
-  fetch(UPSTASH_URL, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(['SET', key, JSON.stringify(valueObj)]),
-  }).then((resp) => {
-    if (!resp.ok) console.error('Upstash SET refuse (' + key + ') :', resp.status);
-  }).catch((e) => console.error('Upstash SET echoue (' + key + ') :', e && e.message ? e.message : e));
+// STAM V7 (19/10/2026) - CORRECTION BUG MAJEUR : cette fonction etait
+// "fire-and-forget" (non-attendue) partout ou elle etait appelee. Resultat
+// constate en reel par Laura Peyre : les donnees revenaient regulierement a
+// une version perimee (15/10/2026) apres chaque mise en veille/redemarrage
+// du service Render, SANS AUCUNE ERREUR VISIBLE cote RH ni cote Claude,
+// car /api/refresh repondait "200 ok" avant meme de savoir si l'ecriture
+// Upstash avait reussi. Desormais kvSet() est ASYNCHRONE, RE-ESSAYEE une
+// fois en cas d'echec, et son resultat ({ok:true}  ou {ok:false, error})
+// est attendu (await) et renvoye dans la reponse JSON par les routes qui
+// l'appellent (/api/refresh notamment) : un "succes" affiche a Laura ne
+// peut plus mentir sur l'etat reel de la sauvegarde durable.
+async function kvSet(key, valueObj) {
+  if (!upstashEnabled()) return { ok: true, skipped: true, raison: 'Upstash non configure' };
+  const body = JSON.stringify(['SET', key, JSON.stringify(valueObj)]);
+  let lastError = null;
+  for (let tentative = 1; tentative <= 2; tentative++) {
+    try {
+      const resp = await fetch(UPSTASH_URL, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${UPSTASH_TOKEN}`, 'Content-Type': 'application/json' },
+        body,
+      });
+      if (resp.ok) return { ok: true };
+      const texte = await resp.text().catch(() => '');
+      lastError = 'HTTP ' + resp.status + (texte ? ' : ' + texte.slice(0, 300) : '');
+      console.error('Upstash SET refuse (' + key + '), tentative ' + tentative + ' :', lastError);
+    } catch (e) {
+      lastError = e && e.message ? e.message : String(e);
+      console.error('Upstash SET echoue (' + key + '), tentative ' + tentative + ' :', lastError);
+    }
+    if (tentative === 1) await new Promise((r) => setTimeout(r, 500));
+  }
+  return { ok: false, error: lastError };
+}
+
+function resumeKvResultats(resultats) {
+  // resultats : objet { data: {ok,...}, dashboard: {ok,...}, ... } -> resume compact
+  const entries = Object.entries(resultats);
+  const enEchec = entries.filter(([, r]) => r && r.ok === false);
+  return {
+    ok: enEchec.length === 0,
+    detail: Object.fromEntries(entries.map(([k, r]) => [k, r && r.skipped ? 'ignore (upstash non configure)' : (r && r.ok ? 'ok' : 'ECHEC : ' + (r && r.error))])),
+  };
 }
 
 const EMPTY_PUBLIC = { genereLe: '—', conducteurs: {}, echeances: {}, apercu: [], historique: [] };
 const EMPTY_DASHBOARD = { genereLe: '—', items: [], echeances: [], apercu: [] };
 
-let rawData = readJsonSafe(DATA_FILE, EMPTY_PUBLIC);
-let rawDashboard = readJsonSafe(DASHBOARD_FILE, EMPTY_DASHBOARD);
+// STAM V7 (19/10/2026) - garde-fou : si data.json/dashboard.json existent
+// mais sont incomplets (JSON valide, mais sans "conducteurs"/"items" etc.,
+// par ex. un vieux fichier de test laisse dans le depot), on complete avec
+// la structure vide plutot que de planter au demarrage (Object.keys sur
+// une cle manquante faisait crasher tout le serveur avant ce correctif).
+let rawData = Object.assign({}, EMPTY_PUBLIC, readJsonSafe(DATA_FILE, {}));
+let rawDashboard = Object.assign({}, EMPTY_DASHBOARD, readJsonSafe(DASHBOARD_FILE, {}));
 
 // decisions : { [contrat]: { statut, commentaire, valideLe, nouvelleDateFin } }
 // assignments : { [contrat]: { conducteur, conducteurMail } }
@@ -418,7 +453,7 @@ const DECISION_MAIL_LABELS = {
 // qui n'identifie pas nommement qui clique (comme avant, avec les liens
 // personnels par conducteur a venir, cela se fera naturellement).
 // ---------------------------------------------------------------------
-app.post('/api/decision', (req, res) => {
+app.post('/api/decision', async (req, res) => {
   const { contrat, decision, commentaire, nouvelleDateFin } = req.body || {};
   if (!contrat || !decision || !DECISION_LABELS[decision]) {
     return res.status(400).json({ error: 'corps attendu : { contrat, decision, commentaire?, nouvelleDateFin? }' });
@@ -433,10 +468,10 @@ app.post('/api/decision', (req, res) => {
     nouvelleDateFin: decision === 'prolonger' ? (nouvelleDateFin || null) : undefined,
   };
   writeJsonSafe(DECISIONS_FILE, decisions);
-  kvSet(KV_KEYS.decisions, decisions);
+  const kvResult = await kvSet(KV_KEYS.decisions, decisions);
   rebuildServed();
   sendDecisionEmail(contrat, decisions[String(contrat)]);
-  res.json({ ok: true });
+  res.json({ ok: true, upstash: kvResult });
 });
 
 // ---------------------------------------------------------------------
@@ -459,16 +494,16 @@ app.get('/api/conducteurs', requireRhAuth, (req, res) => {
   res.json({ conducteurs: list });
 });
 
-app.post('/api/reassign', requireRhAuth, (req, res) => {
+app.post('/api/reassign', requireRhAuth, async (req, res) => {
   const { contrat, conducteur, conducteurMail } = req.body || {};
   if (!contrat || !conducteur) {
     return res.status(400).json({ error: 'corps attendu : { contrat, conducteur, conducteurMail? }' });
   }
   assignments[String(contrat)] = { conducteur: String(conducteur).trim(), conducteurMail: conducteurMail ? String(conducteurMail).trim() : null };
   writeJsonSafe(ASSIGNMENTS_FILE, assignments);
-  kvSet(KV_KEYS.assignments, assignments);
+  const kvResult = await kvSet(KV_KEYS.assignments, assignments);
   rebuildServed();
-  res.json({ ok: true });
+  res.json({ ok: true, upstash: kvResult });
 });
 
 // ---------------------------------------------------------------------
@@ -479,7 +514,7 @@ app.post('/api/reassign', requireRhAuth, (req, res) => {
 // un rafraichissement ne peut jamais effacer une validation ou une
 // reattribution faite entre-temps.
 // ---------------------------------------------------------------------
-app.post('/api/refresh', (req, res) => {
+app.post('/api/refresh', async (req, res) => {
   const token = req.headers['x-refresh-token'];
   if (!process.env.REFRESH_SECRET) {
     return res.status(503).json({ error: 'REFRESH_SECRET non configure sur le service Render.' });
@@ -495,10 +530,66 @@ app.post('/api/refresh', (req, res) => {
   rawDashboard = dashboard;
   writeJsonSafe(DATA_FILE, rawData);
   writeJsonSafe(DASHBOARD_FILE, rawDashboard);
-  kvSet(KV_KEYS.data, rawData);
-  kvSet(KV_KEYS.dashboard, rawDashboard);
+  // STAM V7 (19/10/2026) - on ATTEND desormais la sauvegarde Upstash et on
+  // renvoie son resultat reel : si upstash.ok est false, les donnees sont a
+  // jour sur CE conteneur mais seront PERDUES a la prochaine mise en veille /
+  // au prochain redeploiement Render. pousser_donnees.html affiche ce cas en
+  // rouge au lieu d'annoncer un succes a tort.
+  const [rData, rDashboard] = await Promise.all([
+    kvSet(KV_KEYS.data, rawData),
+    kvSet(KV_KEYS.dashboard, rawDashboard),
+  ]);
   rebuildServed();
-  res.json({ ok: true, genereLe: served.data.genereLe });
+  const resume = resumeKvResultats({ data: rData, dashboard: rDashboard });
+  res.json({ ok: true, genereLe: served.data.genereLe, upstash: resume });
+});
+
+// ---------------------------------------------------------------------
+// Diagnostic Upstash (meme jeton que /api/refresh) : fait un aller-retour
+// SET+GET reel sur une petite cle de test et renvoie le resultat exact
+// (succes, ou code HTTP / message d'erreur Upstash), plus la taille en
+// octets des deux gros objets actuellement en memoire (data/dashboard).
+// Ajoute le 19/10/2026 pour pouvoir diagnostiquer a distance, sans acces
+// aux logs Render ni aux identifiants Upstash, la cause exacte des echecs
+// de sauvegarde constates par Laura Peyre (retour a une version perimee
+// apres mise en veille).
+// ---------------------------------------------------------------------
+app.get('/api/kv-status', async (req, res) => {
+  const token = req.headers['x-refresh-token'];
+  if (!process.env.REFRESH_SECRET) {
+    return res.status(503).json({ error: 'REFRESH_SECRET non configure sur le service Render.' });
+  }
+  if (!token || !timingSafeEqual(token, process.env.REFRESH_SECRET)) {
+    return res.status(401).json({ error: 'jeton invalide' });
+  }
+  if (!upstashEnabled()) {
+    return res.json({ configure: false, message: 'UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN absents sur Render.' });
+  }
+  const cleTest = 'stam:kv-status-test';
+  const valeurTest = { verification: Date.now() };
+  const resultatEcriture = await kvSet(cleTest, valeurTest);
+  let relecture = null;
+  let relectureOk = false;
+  let erreurLecture = null;
+  try {
+    const brut = await kvGet(cleTest);
+    relecture = brut ? JSON.parse(brut) : null;
+    relectureOk = !!(relecture && relecture.verification === valeurTest.verification);
+  } catch (e) {
+    erreurLecture = e && e.message ? e.message : String(e);
+  }
+  res.json({
+    configure: true,
+    ecriture: resultatEcriture,
+    relectureReussie: relectureOk,
+    erreurLecture,
+    taillesActuelles: {
+      dataOctets: rawData ? JSON.stringify(rawData).length : 0,
+      dashboardOctets: rawDashboard ? JSON.stringify(rawDashboard).length : 0,
+      decisionsOctets: decisions ? JSON.stringify(decisions).length : 0,
+      assignmentsOctets: assignments ? JSON.stringify(assignments).length : 0,
+    },
+  });
 });
 
 // ---------------------------------------------------------------------
@@ -520,13 +611,45 @@ async function loadFromUpstashAtBoot() {
     kvGet(KV_KEYS.decisions),
     kvGet(KV_KEYS.assignments),
   ]);
+  // STAM V7 (19/10/2026) - garde-fou supplementaire : si le disque de CE
+  // conteneur contient deja une version plus recente (genereLe) que celle
+  // stockee sur Upstash, on NE L'ECRASE PAS. Sur le plan gratuit Render,
+  // un nouveau conteneur demarre presque toujours disque vierge (donc ce
+  // cas ne se declenche pas), mais si un jour un simple redemarrage de
+  // process a lieu sans recreation de conteneur, ce garde-fou evite de
+  // remplacer des donnees fraiches par une copie Upstash perimee.
+  function plusRecentOuEgal(dateA, dateB) {
+    const parse = (s) => {
+      const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(s || ''));
+      return m ? Number(m[3]) * 10000 + Number(m[2]) * 100 + Number(m[1]) : null;
+    };
+    const a = parse(dateA);
+    const b = parse(dateB);
+    if (a == null) return false; // disque illisible/vide -> Upstash gagne
+    if (b == null) return true; // upstash illisible -> on garde le disque
+    return a >= b;
+  }
   if (d) {
-    try { rawData = JSON.parse(d); writeJsonSafe(DATA_FILE, rawData); }
-    catch (e) { console.error('Upstash data illisible au demarrage :', e.message); }
+    try {
+      const candidat = JSON.parse(d);
+      if (plusRecentOuEgal(rawData && rawData.genereLe, candidat.genereLe)) {
+        console.log('Disque deja a jour (' + (rawData && rawData.genereLe) + ') par rapport a Upstash (' + candidat.genereLe + '), conserve.');
+      } else {
+        rawData = candidat;
+        writeJsonSafe(DATA_FILE, rawData);
+      }
+    } catch (e) { console.error('Upstash data illisible au demarrage :', e.message); }
   }
   if (db) {
-    try { rawDashboard = JSON.parse(db); writeJsonSafe(DASHBOARD_FILE, rawDashboard); }
-    catch (e) { console.error('Upstash dashboard illisible au demarrage :', e.message); }
+    try {
+      const candidat = JSON.parse(db);
+      if (plusRecentOuEgal(rawDashboard && rawDashboard.genereLe, candidat.genereLe)) {
+        console.log('Disque deja a jour (' + (rawDashboard && rawDashboard.genereLe) + ') par rapport a Upstash (' + candidat.genereLe + '), conserve.');
+      } else {
+        rawDashboard = candidat;
+        writeJsonSafe(DASHBOARD_FILE, rawDashboard);
+      }
+    } catch (e) { console.error('Upstash dashboard illisible au demarrage :', e.message); }
   }
   if (dec) {
     try { decisions = JSON.parse(dec); writeJsonSafe(DECISIONS_FILE, decisions); }
