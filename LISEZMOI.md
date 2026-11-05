@@ -126,20 +126,31 @@ réveil — comme avant cette étape.
 ## Mise à jour automatique à chaque signature (moteur V6)
 
 Le site lit directement `VALIDATION_CONTRATS.xlsx`, le fichier que
-`STAM_MOTEUR_V6.vbs` remplit à chaque signature. Deux petits fichiers,
+`STAM_MOTEUR_V6.vbs` remplit à chaque signature. Trois petits fichiers,
 rangés dans `#LAURA/Interim` à côté du moteur (copie dans le dossier
 `windows/` de ce dépôt) :
 
-- **`LANCER_MOTEUR_V6_ET_SITE.vbs`** : à lancer **à la place** de
-  `STAM_MOTEUR_V6.vbs`. Il lance le moteur, attend qu'il ait fini, puis met
-  le site à jour. Une fenêtre confirme : « 301 contrats envoyés, dont 120
-  à valider ».
-- **`POUSSER_SITE_CONTRATS.vbs`** : met seulement le site à jour (par
-  exemple après une correction à la main dans l'Excel).
+- **`INSTALLER_MISE_A_JOUR_AUTO.vbs`** : à lancer **une seule fois**. Il
+  demande l'adresse du site et le code secret (valeur de `REFRESH_SECRET`
+  dans Render → service `contrats` → Environment), fait un premier envoi,
+  propose d'envoyer à chaque conducteur un mail avec son lien, puis crée
+  une tâche Windows « STAM - Site contrats ».
+- Ensuite, **toutes les 10 minutes**, si `VALIDATION_CONTRATS.xlsx` a
+  changé (donc après chaque passage du moteur), `POUSSER_SITE_CONTRATS.vbs`
+  met le site à jour et envoie depuis Outlook, à chaque conducteur qui a de
+  **nouveaux** contrats, le mail « Contrats intérim à valider » : même
+  tableau que le brouillon du moteur (THM 42h / 39h…), bouton vers son lien
+  personnel, PDF signés du dossier `TRAITE` en pièces jointes, expéditeur
+  rh@stam05.fr. Un contrat n'est jamais annoncé deux fois. Rien ne
+  s'affiche quand tout va bien ; un mail qui ne peut pas partir reste dans
+  les Brouillons Outlook et une fenêtre prévient.
+- **`POUSSER_SITE_CONTRATS.vbs`** en double-clic : mise à jour immédiate.
+- **`LANCER_MOTEUR_V6_ET_SITE.vbs`** : lance le moteur puis met le site à
+  jour tout de suite (facultatif, la tâche automatique suffit).
 
-Au tout premier lancement, une fenêtre demande l'adresse du site et le code
-secret : c'est la valeur de `REFRESH_SECRET` (Render → service `contrats`
-→ Environment). Elle est gardée sur le PC, on ne la redemande plus.
+Journal des envois : `%APPDATA%\STAM\site_contrats.log`. Pour arrêter la
+mise à jour automatique : relancer `INSTALLER_MISE_A_JOUR_AUTO.vbs` et
+répondre « Non ».
 
 Ce que fait la mise à jour :
 - les contrats du fichier remplacent ceux du site (un contrat présent deux
@@ -147,9 +158,10 @@ Ce que fait la mise à jour :
 - les validations faites sur le site sont **conservées** ;
 - une validation saisie dans la colonne S de l'Excel (« Validé » /
   « Refusé ») est reprise si le conducteur n'a rien décidé sur le site ;
+- le THM affiché est le THM 42h calculé par le moteur (MTT 42h / 42) ;
 - « Fins proches » = contrats qui finissent dans les 30 jours ;
-- les adresses mail des conducteurs viennent de `CONDUCTEURS.xlsx`.
-- Un conducteur écrit de deux façons (ex. « Aleaxandre » / « Alexandre
+- les adresses mail des conducteurs viennent de `CONDUCTEURS.xlsx` ;
+- un conducteur écrit de deux façons (ex. « Aleaxandre » / « Alexandre
   QUEYRAS ») est réuni grâce à la rubrique `_corrections` de `liens.json`.
 
 ## Étape 7 — Lien personnel de chaque conducteur

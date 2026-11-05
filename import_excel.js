@@ -32,11 +32,14 @@ const COLONNES = [
   ['heuresSemaine', ['heures / sem.', 'heures / sem', 'heures'], 11],
   ['salaire', ['salaire eur/h', 'salaire'], 12],
   ['tarifFacture', ['tarif facture eur/h', 'tarif facture'], 13],
+  ['mtt42', ['mtt 42h'], 14],
   ['thm42', ['thm 42h eur/h', 'thm 42h'], 15],
+  ['mtt39', ['mtt 39h'], 16],
   ['thm39', ['thm 39h eur/h', 'thm 39h'], 17],
   ['validation', ['validation', 'valide (o/n)'], 18],
   ['commentaire', ['commentaire'], 19],
   ['decisionLe', ['decision le (date + heure)', 'decision le', 'valide le'], 20],
+  ['fichier', ['fichier signe'], 21],
 ];
 
 function sansAccent(s) {
@@ -174,8 +177,17 @@ async function construireDepuisExcel(validationBuf, conducteursBuf, options = {}
     if (corrections[slugify(conducteur)]) conducteur = corrections[slugify(conducteur)];
     const slug = slugify(conducteur);
     if (!nomsCanon[slug]) nomsCanon[slug] = conducteur;
+    // THM calcule par le moteur (= MTT 42h / 42) ; recalcule si la formule
+    // n'a pas de valeur enregistree dans le fichier.
+    const mtt42 = nombre(v('mtt42'));
+    const mtt39 = nombre(v('mtt39'));
+    let thm42 = nombre(v('thm42'));
+    let thm39 = nombre(v('thm39'));
+    if (thm42 == null && mtt42 != null) thm42 = Math.round((mtt42 / 42) * 100) / 100;
+    if (thm39 == null && mtt39 != null) thm39 = Math.round((mtt39 / 39) * 100) / 100;
     parContrat.set(contrat, {
       slug,
+      fichier: texte(v('fichier')),
       item: {
         contrat,
         interimaire,
@@ -190,8 +202,8 @@ async function construireDepuisExcel(validationBuf, conducteursBuf, options = {}
         heuresSemaine: nombre(v('heuresSemaine')),
         salaire: nombre(v('salaire')),
         tarifFacture: nombre(v('tarifFacture')),
-        thm42: nombre(v('thm42')),
-        thm39: nombre(v('thm39')),
+        thm42,
+        thm39,
         statut: statutDepuisExcel(v('validation')),
         commentaire: texte(v('commentaire')),
         valideLe: dateFR(v('decisionLe')),
@@ -205,7 +217,9 @@ async function construireDepuisExcel(validationBuf, conducteursBuf, options = {}
   const data = { genereLe, conducteurs: {}, echeances: {}, apercu: [], historique: [] };
   const dashboard = { genereLe, items: [], echeances: [], apercu: [] };
 
-  for (const { slug, item } of parContrat.values()) {
+  const fichiers = {}; // n° de contrat -> nom du PDF signe (pieces jointes des mails)
+  for (const { slug, item, fichier } of parContrat.values()) {
+    if (fichier) fichiers[item.contrat] = fichier;
     const nom = nomsCanon[slug] || item.conducteur;
     item.conducteur = nom;
     const mail = mails[slug] || null;
@@ -222,7 +236,7 @@ async function construireDepuisExcel(validationBuf, conducteursBuf, options = {}
           contrat: item.contrat, interimaire: item.interimaire, qualification: item.qualification,
           agence: item.agence, chantier: item.chantier, conducteur: nom,
           debutMission: item.debutMission, finFerme: item.finFerme,
-          joursRestants: jours, enRetard: false,
+          joursRestants: jours, enRetard: false, thm42: item.thm42, thm39: item.thm39,
           statut: item.statut, commentaire: item.commentaire, valideLe: item.valideLe,
         };
         if (!data.echeances[slug]) data.echeances[slug] = { nom, chantiers: [] };
@@ -230,12 +244,12 @@ async function construireDepuisExcel(validationBuf, conducteursBuf, options = {}
         if (!g) { g = { chantier: item.chantier || '—', items: [] }; data.echeances[slug].chantiers.push(g); }
         g.items.push(ech);
         dashboard.echeances.push(Object.assign({}, ech, mail ? { conducteurMail: mail } : {},
-          { salaire: item.salaire, tarifFacture: item.tarifFacture, thm42: item.thm42 }));
+          { salaire: item.salaire, tarifFacture: item.tarifFacture }));
       }
     }
   }
 
-  return { data, dashboard, nombre: parContrat.size };
+  return { data, dashboard, fichiers, nombre: parContrat.size };
 }
 
 module.exports = { construireDepuisExcel, slugify };
