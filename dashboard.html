@@ -1,3 +1,7 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
 <title>Tableau de bord intérim</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -342,8 +346,11 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
     '</div>';
   }
   function wireAssignCell(container, it, onDone){
-    var box = container.querySelector('.cell-actions[data-contrat="' + String(it.contrat).replace(/"/g,'') + '"]');
-    if (!box) return;
+    // :not(.decision) : la case "decision" porte aussi la classe cell-actions
+    // et le meme data-contrat ; sans ce filtre on tombait sur elle et le
+    // tableau de bord plantait au chargement.
+    var box = container.querySelector('.cell-actions:not(.decision)[data-contrat="' + String(it.contrat).replace(/"/g,'') + '"]');
+    if (!box || !box.querySelector('.assign-btn')) return;
     var btn = box.querySelector('.assign-btn');
     var sel = box.querySelector('.assign-select');
     var okMsg = box.querySelector('.ok-msg');
@@ -699,7 +706,7 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
   document.getElementById('tabEch').addEventListener('click', function(){ showDashTab('ech'); });
   document.getElementById('tabLinks').addEventListener('click', function(){ showDashTab('links'); });
 
-  // STAM V6 - lien personnel par conducteur (/c/<slug>), demande explicite
+  // STAM V6 - lien personnel par conducteur (/c/<slug>/<code secret>), demande explicite
   // de Laura Peyre le 15/10/2026 : chaque conducteur doit voir SES contrats
   // comme un cockpit, plus de liste publique de tous les conducteurs. RH
   // recupere ici le lien de chacun pour le lui transmettre.
@@ -714,7 +721,7 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
     empty.hidden = true;
     var base = window.location.origin;
     container.innerHTML = CONDUCTEURS.map(function(c){
-      var url = base + '/c/' + encodeURIComponent(c.slug);
+      var url = base + (c.lien || ('/c/' + encodeURIComponent(c.slug)));
       return '<div class="row link-row" data-url="' + esc(url) + '">' +
         '<div class="main"><div class="name">' + esc(c.nom) + '</div><div class="url">' + esc(url) + '</div></div>' +
         '<button type="button">Copier</button>' +

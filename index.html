@@ -1,714 +1,726 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
 <title>Contrats à valider</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-/* Layout concept: mobile-first stacked card list behind a sticky conducteur
-   header and a tab switcher (A valider / Echeances / Historique). Each card
-   is a flat bordered panel: identity + chantier up top, a label/value grid,
-   a THM stat tile pulled out for scanning, and an action row that opens an
-   inline decision panel. Built for a foreman checking contracts on a phone
-   at a job site. */
+/* Page personnelle d'un conducteur, pensee pour un telephone sur chantier :
+   en-tete fixe (nom, onglets), une barre de filtres commune aux trois
+   onglets, puis une liste de cartes. Valider = un seul appui (avec
+   "Annuler" pendant quelques secondes) ; refuser demande un motif. */
 :root{
   --bg:#f1efe9; --surface:#ffffff; --surface-2:#f8f6f1; --border:#ddd8cc;
   --fg:#211f1a; --fg-muted:#6b6557; --accent:#c9811f; --accent-ink:#2a1a04;
-  --good:#1f7a4d; --good-bg:#e7f3ec; --bad:#b4332a; --bad-bg:#fbeae8;
+  --good:#1f7a4d; --good-ink:#ffffff; --good-bg:#e7f3ec; --bad:#b4332a; --bad-bg:#fbeae8;
   --info:#2d5f7c; --warn:#a8631b; --warn-bg:#f8ecda; --chip-bg:#eee9da; --focus:#2d5f7c;
+  --toast-bg:#211f1a; --toast-fg:#f1efe9;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --bg:#17160f; --surface:#211f17; --surface-2:#272419; --border:#3a3627;
     --fg:#efece2; --fg-muted:#a39d89; --accent:#e3a63f; --accent-ink:#1c1304;
-    --good:#5fcf94; --good-bg:#15291f; --bad:#f0897f; --bad-bg:#2c1917;
-    --info:#7fb2d4; --warn:#e3a63f; --warn-bg:#2c2415; --chip-bg:#2c2919; --focus:#7fb2d4; color-scheme:dark;
+    --good:#5fcf94; --good-ink:#0d2017; --good-bg:#15291f; --bad:#f0897f; --bad-bg:#2c1917;
+    --info:#7fb2d4; --warn:#e3a63f; --warn-bg:#2c2415; --chip-bg:#2c2919; --focus:#7fb2d4;
+    --toast-bg:#efece2; --toast-fg:#17160f; color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
   --bg:#17160f; --surface:#211f17; --surface-2:#272419; --border:#3a3627;
   --fg:#efece2; --fg-muted:#a39d89; --accent:#e3a63f; --accent-ink:#1c1304;
-  --good:#5fcf94; --good-bg:#15291f; --bad:#f0897f; --bad-bg:#2c1917;
-  --info:#7fb2d4; --warn:#e3a63f; --warn-bg:#2c2415; --chip-bg:#2c2919; --focus:#7fb2d4; color-scheme:dark;
+  --good:#5fcf94; --good-ink:#0d2017; --good-bg:#15291f; --bad:#f0897f; --bad-bg:#2c1917;
+  --info:#7fb2d4; --warn:#e3a63f; --warn-bg:#2c2415; --chip-bg:#2c2919; --focus:#7fb2d4;
+  --toast-bg:#efece2; --toast-fg:#17160f; color-scheme:dark;
 }
 *{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
 body{
-  background:var(--bg); color:var(--fg); font-family:"Public Sans",system-ui,sans-serif;
+  margin:0; background:var(--bg); color:var(--fg); font-family:"Public Sans",system-ui,sans-serif;
   padding-left:max(16px, env(safe-area-inset-left,0px));
   padding-right:max(16px, env(safe-area-inset-right,0px));
 }
-h1,h2,h3,.display{font-family:"Archivo",system-ui,sans-serif; text-wrap:balance}
+h1,h2,.display{font-family:"Archivo",system-ui,sans-serif; text-wrap:balance}
 .tabular{font-variant-numeric:tabular-nums}
-.wrap{max-width:640px; margin:0 auto; padding-block:0 32px}
+.wrap{max-width:640px; margin:0 auto; padding-bottom:110px}
+button{font:inherit; color:inherit}
+:focus-visible{outline:2px solid var(--focus); outline-offset:2px}
+[hidden]{display:none!important}
 
+/* ---------- en-tete ---------- */
 header.top{
-  position:sticky; top:env(safe-area-inset-top,0px); z-index:5;
-  background:var(--bg); padding-block:14px 10px; border-bottom:1px solid var(--border);
+  position:sticky; top:0; z-index:5; background:var(--bg);
+  padding-top:max(14px, env(safe-area-inset-top,0px)); padding-bottom:10px;
+  border-bottom:1px solid var(--border);
 }
 .brand{display:flex; align-items:baseline; justify-content:space-between; gap:8px}
 .brand .mark{font-family:"Archivo"; font-weight:800; font-size:12px; letter-spacing:.14em; color:var(--accent)}
 .brand time{font-size:11px; color:var(--fg-muted)}
-.title-row{margin-top:6px}
-h1{font-size:21px; font-weight:800; margin:0; line-height:1.15}
-.subtitle{font-size:13px; color:var(--fg-muted); margin-top:3px}
-.subtitle strong{color:var(--fg); font-weight:600}
-
-.tabs{display:flex; gap:6px; margin-top:14px}
+h1{font-size:22px; font-weight:800; margin:6px 0 0; line-height:1.15}
+.subtitle{font-size:13.5px; color:var(--fg-muted); margin-top:3px}
+.subtitle strong{color:var(--fg)}
+.tabs{display:flex; gap:6px; margin-top:12px}
 .tab{
-  flex:1; min-width:0; text-align:center; padding:9px 6px; border-radius:8px;
-  border:1px solid var(--border); background:var(--surface-2); color:var(--fg-muted);
-  font:600 12.5px "Public Sans"; cursor:pointer;
+  flex:1; min-width:0; padding:10px 4px; border-radius:9px; border:1px solid var(--border);
+  background:var(--surface-2); color:var(--fg-muted); font-weight:600; font-size:13px; cursor:pointer;
 }
 .tab[aria-selected="true"]{background:var(--fg); color:var(--bg); border-color:var(--fg)}
-.tab .n{font-family:"Archivo"; font-weight:700}
+.tab .n{font-family:"Archivo"; font-weight:700; margin-left:2px}
 
-.switcher{padding-block:18px}
-.switcher p{color:var(--fg-muted); font-size:14px; line-height:1.5}
-.switcher .note{
-  background:var(--chip-bg); border:1px solid var(--border); border-radius:10px;
-  padding:10px 12px; font-size:12.5px; color:var(--fg-muted); margin-bottom:16px;
+/* ---------- filtres ---------- */
+.filters{padding-top:12px}
+.search{
+  width:100%; font-size:16px; padding:10px 12px; border-radius:10px; border:1px solid var(--border);
+  background:var(--surface); color:var(--fg);
 }
-.cond-list{display:flex; flex-direction:column; gap:8px}
-.cond-btn{
-  display:flex; align-items:center; justify-content:space-between; gap:10px;
-  padding:13px 14px; border-radius:10px; border:1px solid var(--border);
-  background:var(--surface); color:var(--fg); text-align:left; cursor:pointer; font:inherit;
-}
-.cond-btn:hover{border-color:var(--accent)}
-.cond-btn .name{font-weight:600; font-size:14.5px}
-.cond-btn .count{
-  font-family:"Archivo"; font-weight:700; font-size:13px; color:var(--accent-ink);
-  background:var(--accent); border-radius:999px; padding:2px 9px; flex:none;
-}
-.ov-link{
-  display:flex; align-items:center; justify-content:center; gap:7px; width:100%;
-  margin-top:16px; padding:11px; border-radius:10px; border:1px dashed var(--border);
-  background:none; color:var(--info); font:600 13px "Public Sans"; cursor:pointer;
-}
-.ov-link:hover{border-color:var(--info)}
-
-.site-filter{display:flex; align-items:center; gap:8px; padding-top:16px; flex-wrap:wrap}
-.site-filter[hidden]{display:none!important}
-.site-filter label{font-size:11.5px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.04em; flex:none}
-.site-filter select{
-  flex:1; min-width:0; font:500 13px "Public Sans"; padding:8px 10px; border-radius:8px;
+.search::placeholder{color:var(--fg-muted)}
+.selects{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px}
+.field{min-width:0}
+.field label{display:block; font-size:11px; font-weight:600; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.05em; margin:0 0 3px 2px}
+.field select{
+  width:100%; font-size:15px; font-weight:500; padding:9px 30px 9px 10px; border-radius:9px;
   border:1px solid var(--border); background:var(--surface); color:var(--fg);
+  appearance:none; -webkit-appearance:none; text-overflow:ellipsis;
+  background-image:linear-gradient(45deg,transparent 50%,var(--fg-muted) 50%),linear-gradient(135deg,var(--fg-muted) 50%,transparent 50%);
+  background-position:calc(100% - 15px) 52%, calc(100% - 10px) 52%; background-size:5px 5px; background-repeat:no-repeat;
 }
-.list{display:flex; flex-direction:column; gap:12px; padding-top:16px}
-.list[data-filtered-top="1"]{padding-top:12px}
+.field select.active{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent)}
+.filter-status{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px; min-height:22px; font-size:13px; color:var(--fg-muted)}
+.filter-status strong{color:var(--fg)}
+.linkbtn{background:none; border:none; padding:2px 0; color:var(--info); font-weight:600; font-size:13px; cursor:pointer; text-decoration:underline; text-underline-offset:2px}
+
+/* ---------- tout valider ---------- */
+.bulk{
+  margin-top:12px; border:1px solid var(--good); background:var(--good-bg); border-radius:12px; padding:12px;
+}
+.bulk-btn{
+  width:100%; padding:13px; border-radius:10px; border:none; background:var(--good); color:var(--good-ink);
+  font-weight:700; font-size:15px; cursor:pointer;
+}
+.bulk p{margin:0 0 10px; font-size:14px; line-height:1.45}
+.bulk .row{display:flex; gap:8px}
+.bulk .row button{flex:1; padding:12px 8px; border-radius:10px; font-weight:700; font-size:14px; cursor:pointer}
+.bulk .confirm{border:none; background:var(--good); color:var(--good-ink)}
+.bulk .cancel{border:1px solid var(--border); background:var(--surface); color:var(--fg)}
+.bulk button:disabled{opacity:.6; cursor:default}
+.bulk .err{color:var(--bad); font-size:13px; margin-top:8px}
+
+/* ---------- cartes ---------- */
+.list{display:flex; flex-direction:column; gap:12px; padding-top:12px}
 .card{
-  background:var(--surface); border:1px solid var(--border); border-radius:12px;
-  padding:14px 14px 12px; min-width:0;
+  background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px; min-width:0;
+  transition:opacity .25s, transform .25s;
 }
+.card.leaving{opacity:0; transform:translateX(24px)}
 .card-head{display:flex; justify-content:space-between; gap:10px; align-items:flex-start}
 .who{min-width:0}
-.who .name{font-weight:700; font-size:15px; line-height:1.25}
-.who .qual{font-size:12.5px; color:var(--fg-muted); margin-top:1px}
+.who .name{font-weight:700; font-size:16px; line-height:1.25; overflow-wrap:anywhere}
+.who .poste{font-size:13.5px; color:var(--fg); margin-top:2px; font-weight:500}
+.who .poste small{color:var(--fg-muted); font-weight:400; font-size:12px}
 .chip{
-  flex:none; font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
-  background:var(--chip-bg); color:var(--fg-muted); border-radius:6px; padding:3px 7px;
+  flex:none; font-size:11px; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
+  background:var(--chip-bg); color:var(--fg-muted); border-radius:6px; padding:3px 7px; white-space:nowrap;
 }
 .chip.warn{background:var(--warn-bg); color:var(--warn)}
 .chip.bad{background:var(--bad-bg); color:var(--bad)}
-.site-row{display:flex; align-items:center; gap:6px; margin-top:8px; font-size:13px; color:var(--info)}
-.site-row svg{flex:none}
-
-.grid{
-  display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; margin-top:12px;
-  padding-top:11px; border-top:1px solid var(--border);
+.chip.ok{background:var(--good-bg); color:var(--good)}
+.meta{display:flex; flex-wrap:wrap; gap:4px 14px; margin-top:8px; font-size:13px; color:var(--fg-muted)}
+.meta span{display:inline-flex; align-items:center; gap:5px; min-width:0}
+.meta .site{color:var(--info); font-weight:500}
+.meta svg{flex:none}
+.facts{
+  display:grid; grid-template-columns:1fr 1fr; gap:10px 14px; margin-top:12px; padding-top:12px; border-top:1px solid var(--border);
 }
-.cell{min-width:0}
-.cell .lbl{font-size:10.5px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.05em}
-.cell .val{font-size:13.5px; font-weight:600; margin-top:1px}
-.cell .val.muted{font-weight:400; color:var(--fg-muted)}
+.fact .lbl{font-size:11px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.05em}
+.fact .val{font-size:14.5px; font-weight:600; margin-top:1px}
+.fact .val.big{font-family:"Archivo"; font-size:17px}
+.fact .sub{font-size:12px; color:var(--fg-muted); margin-top:1px}
+details.more{margin-top:10px; font-size:13px}
+details.more summary{cursor:pointer; color:var(--info); font-weight:600; list-style:none; padding:4px 0}
+details.more summary::-webkit-details-marker{display:none}
+details.more summary::before{content:"+ "}
+details.more[open] summary::before{content:"− "}
+details.more .facts{margin-top:6px; border-top:none; padding-top:0}
 
-.thm-row{display:flex; gap:8px; margin-top:12px}
-.thm{
-  flex:1; background:var(--surface-2); border:1px solid var(--border); border-radius:9px;
-  padding:8px 10px;
-}
-.thm .lbl{font-size:10px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.04em}
-.thm .val{font-family:"Archivo"; font-weight:700; font-size:17px; margin-top:1px}
-.thm .unit{font-size:11px; font-weight:500; color:var(--fg-muted)}
-
-.actions{display:flex; gap:8px; margin-top:13px; flex-wrap:wrap}
+.actions{display:flex; gap:8px; margin-top:14px}
 .btn{
-  flex:1; min-width:84px; padding:10px 8px; border-radius:9px; font:600 13px "Public Sans"; cursor:pointer;
+  flex:1; min-height:46px; padding:10px 8px; border-radius:10px; font-weight:700; font-size:15px; cursor:pointer;
   border:1px solid var(--border); background:var(--surface-2); color:var(--fg);
 }
+.btn:disabled{opacity:.6; cursor:default}
+.btn.go{background:var(--good); border-color:var(--good); color:var(--good-ink); flex:1.6}
 .btn.ok{border-color:var(--good); color:var(--good)}
-.btn.ok[aria-pressed="true"]{background:var(--good-bg)}
-.btn.no{border-color:var(--bad); color:var(--bad)}
-.btn.no[aria-pressed="true"]{background:var(--bad-bg)}
-.btn.wait{border-color:var(--fg-muted)}
-.btn.wait[aria-pressed="true"]{background:var(--chip-bg)}
-.btn:focus-visible{outline:2px solid var(--focus); outline-offset:2px}
+.btn.no{border-color:var(--bad); color:var(--bad); background:var(--surface)}
+.btn.wait{color:var(--fg-muted)}
+.btn[aria-pressed="true"].no{background:var(--bad-bg)}
+.btn[aria-pressed="true"].ok{background:var(--good-bg)}
+.btn[aria-pressed="true"].wait{background:var(--chip-bg)}
 
-.panel{margin-top:11px; border-top:1px dashed var(--border); padding-top:11px}
-.panel[hidden]{display:none!important}
-.panel p{font-size:12.5px; color:var(--fg-muted); margin:0 0 8px; line-height:1.5}
-.panel textarea{
-  width:100%; min-height:52px; resize:vertical; border:1px solid var(--border); border-radius:8px;
-  padding:8px 9px; font:400 13px "Public Sans"; background:var(--surface); color:var(--fg);
+.panel{margin-top:12px; border-top:1px dashed var(--border); padding-top:12px}
+.panel p{font-size:13.5px; margin:0 0 8px; line-height:1.45}
+.panel textarea, .panel input[type=date]{
+  width:100%; border:1px solid var(--border); border-radius:9px; padding:10px; font-size:16px;
+  font-family:inherit; background:var(--surface); color:var(--fg);
 }
-.field-date{margin-bottom:9px}
-.field-date[hidden]{display:none!important}
-.field-date label{display:block; font-size:11.5px; color:var(--fg-muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:.04em}
-.field-date input{
-  width:100%; border:1px solid var(--border); border-radius:8px; padding:8px 9px;
-  font:500 13px "Public Sans"; background:var(--surface); color:var(--fg);
-}
-.submit-row{display:flex; align-items:center; gap:10px; margin-top:9px; flex-wrap:wrap}
-.submit-row .primary{
-  font:600 13px "Public Sans"; padding:9px 16px; border-radius:8px; border:1px solid var(--accent);
-  background:var(--accent); color:var(--accent-ink); cursor:pointer;
-}
-.submit-row .primary:disabled{opacity:.6; cursor:default}
-.submit-row .err{font-size:12px; color:var(--bad)}
-.submit-row .err[hidden]{display:none!important}
-.done{
-  margin-top:11px; padding:9px 11px; border-radius:8px; background:var(--good-bg); color:var(--good);
-  font:600 12.5px "Public Sans";
-}
-.done[hidden]{display:none!important}
-.card.decided .actions{display:none}
-.chip.ok{background:var(--good-bg); color:var(--good)}
-.chip.no{background:var(--bad-bg); color:var(--bad)}
-.card.hist .hist-detail{margin-top:9px; padding-top:9px; border-top:1px solid var(--border); font-size:13px}
-.card.hist .hist-detail.muted{color:var(--fg-muted); font-style:italic; border-top:none; padding-top:0; margin-top:4px}
-.card.hist .hist-date{margin-top:6px; font-size:11.5px; color:var(--fg-muted)}
+.panel textarea{min-height:64px; resize:vertical}
+.panel label{display:block; font-size:12px; font-weight:600; color:var(--fg-muted); margin:0 0 4px; text-transform:uppercase; letter-spacing:.04em}
+.panel .date-field{margin-bottom:10px}
+.panel .row{display:flex; gap:8px; margin-top:10px}
+.panel .row button{flex:1; min-height:44px; border-radius:10px; font-weight:700; font-size:14px; cursor:pointer}
+.panel .submit{border:none; background:var(--fg); color:var(--bg)}
+.panel .submit.danger{background:var(--bad); color:#fff}
+.panel .cancel{border:1px solid var(--border); background:var(--surface)}
+.panel .err{color:var(--bad); font-size:13px; margin-top:8px}
 
-/* echeances : regroupe par chantier */
-.site-group{margin-top:18px}
-.site-group:first-child{margin-top:0}
-.site-group h2{font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px; margin:0 0 8px}
-.site-group h2 svg{flex:none; color:var(--info)}
-.site-group .count{font-family:"Archivo"; color:var(--fg-muted); font-weight:600}
+.hist-note{margin-top:9px; padding-top:9px; border-top:1px solid var(--border); font-size:13.5px}
+.hist-note.quote{color:var(--fg-muted); font-style:italic}
+.hist-foot{display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:8px; font-size:12.5px; color:var(--fg-muted)}
 
-/* apercu global (vue d'ensemble, sans montants) */
-.ov-table{display:flex; flex-direction:column; gap:8px; padding-top:16px}
-.ov-row{
-  display:flex; align-items:center; gap:10px; padding:12px 13px; border:1px solid var(--border);
-  border-radius:10px; background:var(--surface);
-}
-.ov-row .name{flex:1; min-width:0; font-weight:600; font-size:14px}
-.ov-stat{text-align:center; min-width:40px}
-.ov-stat b{display:block; font-family:"Archivo"; font-size:15px; font-weight:700}
-.ov-stat span{font-size:9.5px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.04em}
-.ov-stat.wait b{color:var(--warn)}
-.ov-stat.ok b{color:var(--good)}
-.ov-stat.bad b{color:var(--bad)}
+.site-group{margin-top:20px}
+.site-group:first-child{margin-top:4px}
+.site-group h2{font-size:14px; font-weight:700; display:flex; align-items:center; gap:6px; margin:0 0 8px; color:var(--info)}
+.site-group h2 .count{font-family:"Archivo"; color:var(--fg-muted); font-weight:600}
+.site-group .list{padding-top:0}
 
 .empty{
-  margin-top:20px; text-align:center; padding:34px 18px; border:1px dashed var(--border);
-  border-radius:12px; color:var(--fg-muted);
+  margin-top:16px; text-align:center; padding:34px 18px; border:1px dashed var(--border);
+  border-radius:14px; color:var(--fg-muted);
 }
-.empty .big{font-family:"Archivo"; font-weight:700; color:var(--fg); font-size:15px; margin-bottom:4px}
-.empty p{font-size:13px; line-height:1.5; max-width:38ch; margin:0 auto}
+.empty .big{font-family:"Archivo"; font-weight:700; color:var(--fg); font-size:16px; margin-bottom:6px}
+.empty p{font-size:14px; line-height:1.5; max-width:38ch; margin:0 auto}
+.empty .linkbtn{margin-top:10px}
 
-.back{
-  display:inline-flex; align-items:center; gap:4px; margin-top:16px; font-size:12.5px;
-  color:var(--fg-muted); background:none; border:none; cursor:pointer; padding:4px 0; font:inherit;
+/* ---------- toast ---------- */
+.toast{
+  position:fixed; left:50%; transform:translateX(-50%); bottom:max(16px, env(safe-area-inset-bottom,0px));
+  z-index:20; width:min(560px, calc(100% - 32px)); display:flex; align-items:center; gap:12px;
+  background:var(--toast-bg); color:var(--toast-fg); border-radius:12px; padding:12px 14px;
+  box-shadow:0 8px 24px rgba(0,0,0,.25); font-size:14px; font-weight:500;
 }
-.back:hover{color:var(--fg)}
-[hidden]{display:none!important}
+.toast .msg{flex:1; min-width:0}
+.toast button{background:none; border:none; color:var(--accent); font-weight:700; font-size:14px; cursor:pointer; padding:6px 4px}
+.toast.error{background:var(--bad); color:#fff}
+.toast.error button{color:#fff}
 </style>
-
+</head>
+<body>
 <div class="wrap">
   <header class="top">
     <div class="brand">
       <span class="mark">STAM — Intérim</span>
       <time id="genTime"></time>
     </div>
-    <div class="title-row">
-      <h1 id="pageTitle">Contrats à valider</h1>
-      <div class="subtitle" id="subtitle">Utilisez votre lien personnel pour voir vos contrats.</div>
-    </div>
-    <div class="tabs" id="tabs" hidden>
-      <button class="tab" id="tabPending" role="tab" aria-selected="true">À valider <span class="n" id="countPending"></span></button>
-      <button class="tab" id="tabEcheances" role="tab" aria-selected="false">Échéances <span class="n" id="countEcheances"></span></button>
-      <button class="tab" id="tabHistory" role="tab" aria-selected="false">Historique <span class="n" id="countHistory"></span></button>
+    <h1 id="pageTitle">Contrats à valider</h1>
+    <div class="subtitle" id="subtitle">Chargement…</div>
+    <div class="tabs" id="tabs" role="tablist" hidden>
+      <button class="tab" id="tab-pending" role="tab" aria-selected="true" data-tab="pending">À valider <span class="n" id="n-pending"></span></button>
+      <button class="tab" id="tab-echeances" role="tab" aria-selected="false" data-tab="echeances">Fins proches <span class="n" id="n-echeances"></span></button>
+      <button class="tab" id="tab-history" role="tab" aria-selected="false" data-tab="history">Historique <span class="n" id="n-history"></span></button>
     </div>
   </header>
 
-  <div id="switcher" class="switcher">
-    <div class="empty" style="margin-top:8px">
-      <div class="big">Lien personnel requis</div>
-      <p>Cette page affiche les contrats d'un seul conducteur à la fois, via un lien personnel. Si vous êtes conducteur et n'avez pas reçu le vôtre, contactez le service RH.</p>
-    </div>
+  <div id="message" hidden></div>
+
+  <div id="app" hidden>
+    <section class="filters" aria-label="Filtres">
+      <input type="search" class="search" id="q" placeholder="Rechercher un intérimaire…" autocomplete="off" enterkeyhint="search">
+      <div class="selects">
+        <div class="field"><label for="f-chantier">Chantier</label><select id="f-chantier" data-key="chantier"></select></div>
+        <div class="field"><label for="f-poste">Poste</label><select id="f-poste" data-key="poste"></select></div>
+        <div class="field"><label for="f-mois">Fin de contrat</label><select id="f-mois" data-key="mois"></select></div>
+        <div class="field" id="field-agence"><label for="f-agence">Agence</label><select id="f-agence" data-key="agence"></select></div>
+      </div>
+      <div class="filter-status">
+        <span id="resultCount"></span>
+        <button class="linkbtn" id="clearFilters" hidden>Effacer les filtres</button>
+      </div>
+    </section>
+
+    <main id="view-pending">
+      <div class="bulk" id="bulk" hidden>
+        <button class="bulk-btn" id="bulkStart"></button>
+        <div id="bulkConfirm" hidden>
+          <p id="bulkText"></p>
+          <div class="row">
+            <button class="cancel" id="bulkCancel">Annuler</button>
+            <button class="confirm" id="bulkGo"></button>
+          </div>
+          <div class="err" id="bulkErr" hidden></div>
+        </div>
+      </div>
+      <div class="list" id="list-pending"></div>
+    </main>
+    <main id="view-echeances" hidden><div id="list-echeances"></div></main>
+    <main id="view-history" hidden><div class="list" id="list-history"></div></main>
+    <div id="emptyBox" class="empty" hidden></div>
   </div>
+</div>
 
-  <main id="pendingView" hidden>
-    <div class="site-filter" id="pendingFilter" hidden>
-      <label for="chantierFilter">Chantier</label>
-      <select id="chantierFilter"></select>
-      <label for="agenceFilter">Agence</label>
-      <select id="agenceFilter"></select>
-    </div>
-    <div class="list" id="pendingList"></div>
-    <div class="empty" id="pendingEmpty" hidden>
-      <div class="big">Rien à valider</div>
-      <p>Tous les contrats de vos chantiers sont à jour.</p>
-    </div>
-  </main>
-
-  <main id="echeancesView" hidden>
-    <div id="echeancesGroups"></div>
-    <div class="empty" id="echeancesEmpty" hidden>
-      <div class="big">Aucune échéance proche</div>
-      <p>Aucun contrat de vos chantiers n'arrive à échéance dans les prochaines semaines.</p>
-    </div>
-  </main>
-
-  <main id="historyView" hidden>
-    <div class="list" id="historyList"></div>
-    <div class="empty" id="historyEmpty" hidden>
-      <div class="big">Historique vide pour l'instant</div>
-      <p>Dès qu'un contrat sera validé ou refusé, il apparaîtra ici avec la date et le commentaire — c'est ce qui fait la traçabilité.</p>
-    </div>
-  </main>
-
-  <main id="overviewView" hidden>
-    <p class="subtitle" style="margin-top:14px">Nombre de contrats par conducteur — sans montants. Le détail complet (tarifs, salaires) est réservé au tableau de bord RH.</p>
-    <div class="ov-table" id="ovTable"></div>
-  </main>
-
-  <button class="back" id="backBtn" hidden>
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
-    <span id="backBtnLabel">Changer de conducteur</span>
-  </button>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden>
+  <span class="msg" id="toastMsg"></span>
+  <button id="toastUndo" hidden>Annuler</button>
 </div>
 
 <script>
 (function(){
   "use strict";
-  var DATA = null;
-  var onDecided = null; // callback set per-conducteur view to refresh counts after a decision
 
-  var els = {
-    genTime: document.getElementById('genTime'),
-    pageTitle: document.getElementById('pageTitle'),
-    subtitle: document.getElementById('subtitle'),
-    tabs: document.getElementById('tabs'),
-    tabPending: document.getElementById('tabPending'),
-    tabEcheances: document.getElementById('tabEcheances'),
-    tabHistory: document.getElementById('tabHistory'),
-    countPending: document.getElementById('countPending'),
-    countEcheances: document.getElementById('countEcheances'),
-    countHistory: document.getElementById('countHistory'),
-    switcher: document.getElementById('switcher'),
-    ovLink: document.getElementById('ovLink'),
-    condList: document.getElementById('condList'),
-    pendingView: document.getElementById('pendingView'),
-    pendingFilter: document.getElementById('pendingFilter'),
-    chantierFilter: document.getElementById('chantierFilter'),
-    agenceFilter: document.getElementById('agenceFilter'),
-    echeancesView: document.getElementById('echeancesView'),
-    historyView: document.getElementById('historyView'),
-    overviewView: document.getElementById('overviewView'),
-    pendingList: document.getElementById('pendingList'),
-    echeancesGroups: document.getElementById('echeancesGroups'),
-    historyList: document.getElementById('historyList'),
-    ovTable: document.getElementById('ovTable'),
-    pendingEmpty: document.getElementById('pendingEmpty'),
-    echeancesEmpty: document.getElementById('echeancesEmpty'),
-    historyEmpty: document.getElementById('historyEmpty'),
-    backBtn: document.getElementById('backBtn'),
-    backBtnLabel: document.getElementById('backBtnLabel'),
-  };
-
-  function escapeHtml(s){
+  /* ---------- outils ---------- */
+  function $(id){ return document.getElementById(id); }
+  function esc(s){
     return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
     });
   }
-
-  function num(v, unit){
-    if (v === null || v === undefined) return '—';
-    return v.toFixed(2).replace('.', ',') + (unit || '');
-  }
-
-  var uid = 0;
-  function nextId(){ return 'c' + (uid++); }
-
-  /* ---------- decision enregistree directement sur le site ----------- */
-  function buildPanel(id, labels){
-    // labels: tableau de {key, cls, label, verbe, prompt, needsDate?}
-    var decisions = labels;
-    return (
-      '<div class="actions">' +
-        decisions.map(function(d){
-          return '<button class="btn ' + d.cls + '" data-id="' + id + '" data-decision="' + d.key + '" aria-pressed="false">' + d.label + '</button>';
-        }).join('') +
-      '</div>' +
-      '<div class="panel" id="panel-' + id + '" hidden>' +
-        '<p id="panelPrompt-' + id + '"></p>' +
-        '<div class="field-date" id="fieldDate-' + id + '" hidden>' +
-          '<label for="date-' + id + '">Nouvelle date de fin</label>' +
-          '<input type="date" id="date-' + id + '">' +
-        '</div>' +
-        '<textarea id="comment-' + id + '" placeholder="Commentaire (optionnel)"></textarea>' +
-        '<div class="submit-row">' +
-          '<button class="primary" id="submit-' + id + '">Enregistrer</button>' +
-          '<span class="err" id="err-' + id + '" hidden></span>' +
-        '</div>' +
-      '</div>' +
-      '<div class="done" id="done-' + id + '" hidden></div>'
-    );
-  }
-
-  function wirePanel(id, item, decisions){
-    var panel = document.getElementById('panel-' + id);
-    var prompt = document.getElementById('panelPrompt-' + id);
-    var comment = document.getElementById('comment-' + id);
-    var fieldDate = document.getElementById('fieldDate-' + id);
-    var dateInput = document.getElementById('date-' + id);
-    var submitBtn = document.getElementById('submit-' + id);
-    var errSpan = document.getElementById('err-' + id);
-    var doneBox = document.getElementById('done-' + id);
-    var article = panel.closest('.card');
-    var buttons = decisions.map(function(d){
-      return document.querySelector('.btn.' + d.cls + '[data-id="' + id + '"]');
-    });
-    var currentDecision = null;
-
-    function openPanel(decision, d){
-      currentDecision = decision;
-      buttons.forEach(function(b, i){ b.setAttribute('aria-pressed', String(decisions[i].key === decision)); });
-      prompt.textContent = d.prompt;
-      fieldDate.hidden = !d.needsDate;
-      errSpan.hidden = true;
-      panel.hidden = false;
-    }
-
-    decisions.forEach(function(d, i){
-      buttons[i].addEventListener('click', function(){
-        if (currentDecision === d.key){ currentDecision = null; panel.hidden = true; buttons[i].setAttribute('aria-pressed','false'); }
-        else openPanel(d.key, d);
-      });
-    });
-
-    function isoToFR(iso){
-      if (!iso) return null;
-      var p = iso.split('-');
-      return p.length === 3 ? (p[2] + '/' + p[1] + '/' + p[0]) : null;
-    }
-
-    submitBtn.addEventListener('click', function(){
-      var d = decisions.filter(function(x){ return x.key === currentDecision; })[0];
-      if (!d) return;
-      var nouvelleDateFin = d.needsDate ? isoToFR(dateInput.value) : null;
-      if (d.needsDate && !nouvelleDateFin){
-        errSpan.textContent = 'Merci de choisir une date.';
-        errSpan.hidden = false;
-        return;
-      }
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Envoi…';
-      errSpan.hidden = true;
-      fetch('/api/decision', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ contrat: item.contrat, decision: currentDecision, commentaire: comment.value, nouvelleDateFin: nouvelleDateFin })
-      }).then(function(r){
-        if (!r.ok) throw new Error('http ' + r.status);
-        return r.json();
-      }).then(function(){
-        item.statut = {ok:'valide', no:'refuse', prolonger:'prolonge', arreter:'arrete', attente:'attente'}[currentDecision];
-        item.commentaire = comment.value.trim() || null;
-        item.nouvelleDateFin = nouvelleDateFin || undefined;
-        panel.hidden = true;
-        doneBox.hidden = false;
-        doneBox.textContent = '✓ Enregistré — ' + d.verbe.charAt(0) + d.verbe.slice(1).toLowerCase();
-        if (article) article.classList.add('decided');
-        if (typeof onDecided === 'function') onDecided();
-      }).catch(function(){
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Enregistrer';
-        errSpan.textContent = 'Échec de l\'enregistrement — vérifiez votre connexion et réessayez.';
-        errSpan.hidden = false;
-      });
-    });
-  }
-
-  /* ---------- À valider ------------------------------------------- */
-  var VALID_DECISIONS = [
-    {key:'ok', cls:'ok', label:'Valider', verbe:'VALIDÉ', prompt:"Confirmez la validation (un commentaire est possible, mais optionnel) :"},
-    {key:'no', cls:'no', label:'Refuser', verbe:'REFUSÉ', prompt:"Confirmez le refus — précisez la raison si possible :"},
-  ];
-
-  function pendingCardHtml(item){
-    var id = nextId();
-    item._id = id;
-    return '<article class="card">' +
-      '<div class="card-head">' +
-        '<div class="who"><div class="name">' + escapeHtml(item.interimaire) + '</div>' +
-        '<div class="qual">' + escapeHtml(item.qualification || '—') + '</div></div>' +
-        '<span class="chip">' + escapeHtml(item.agence || '') + '</span>' +
-      '</div>' +
-      '<div class="site-row">' +
-        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-7.2 7-12a7 7 0 10-14 0c0 4.8 7 12 7 12z"/><circle cx="12" cy="9" r="2.3"/></svg>' +
-        escapeHtml(item.chantier || '—') +
-      '</div>' +
-      '<div class="grid">' +
-        '<div class="cell"><div class="lbl">Mission</div><div class="val tabular">' + escapeHtml(item.debutMission||'—') + ' → ' + escapeHtml(item.finFerme||'—') + '</div></div>' +
-        '<div class="cell"><div class="lbl">Souplesse</div><div class="val muted tabular">' + escapeHtml(item.debutSouplesse||'—') + ' → ' + escapeHtml(item.finSouplesse||'—') + '</div></div>' +
-        '<div class="cell"><div class="lbl">Heures / sem.</div><div class="val tabular">' + (item.heuresSemaine ?? '—') + ' h</div></div>' +
-        '<div class="cell"><div class="lbl">Salaire / Facturé</div><div class="val tabular">' + num(item.salaire,'') + ' / ' + num(item.tarifFacture,'') + ' €/h</div></div>' +
-      '</div>' +
-      '<div class="thm-row">' +
-        '<div class="thm"><div class="lbl">THM 42h</div><div class="val tabular">' + num(item.thm42) + ' <span class="unit">€/h</span></div></div>' +
-        '<div class="thm"><div class="lbl">THM 39h</div><div class="val tabular">' + num(item.thm39) + ' <span class="unit">€/h</span></div></div>' +
-      '</div>' +
-      buildPanel(id, VALID_DECISIONS) +
-    '</article>';
-  }
-
-  function isDecided(item){ return !!item.statut && item.statut !== 'attente'; }
-
-  var pendingAllItems = [];
-  var pendingChantierFilter = 'tous';
-  var pendingAgenceFilter = 'tous';
-
-  function fillFilterSelect(sel, values, prevValue, allLabel){
-    var uniques = Array.from(new Set(values.filter(Boolean))).sort(function(a, b){ return a.localeCompare(b, 'fr'); });
-    sel.innerHTML = '<option value="tous">' + allLabel + '</option>' +
-      uniques.map(function(v){ return '<option value="' + escapeHtml(v) + '"' + (v === prevValue ? ' selected' : '') + '>' + escapeHtml(v) + '</option>'; }).join('');
-    var resetValue = (prevValue !== 'tous' && uniques.indexOf(prevValue) === -1) ? 'tous' : prevValue;
-    sel.value = resetValue;
-    return { uniques: uniques, value: resetValue };
-  }
-
-  function renderPendingList(){
-    var items = pendingAllItems.filter(function(it){ return !isDecided(it); });
-    var chantiersRes = fillFilterSelect(els.chantierFilter, items.map(function(it){ return it.chantier; }), pendingChantierFilter, 'Tous les chantiers');
-    pendingChantierFilter = chantiersRes.value;
-    var agencesRes = fillFilterSelect(els.agenceFilter, items.map(function(it){ return it.agence; }), pendingAgenceFilter, 'Toutes les agences');
-    pendingAgenceFilter = agencesRes.value;
-    // le filtre ne s'affiche que s'il y a de quoi filtrer (plus d'une valeur)
-    els.pendingFilter.hidden = chantiersRes.uniques.length <= 1 && agencesRes.uniques.length <= 1;
-    if (pendingChantierFilter !== 'tous'){
-      items = items.filter(function(it){ return it.chantier === pendingChantierFilter; });
-    }
-    if (pendingAgenceFilter !== 'tous'){
-      items = items.filter(function(it){ return it.agence === pendingAgenceFilter; });
-    }
-    if (!items.length){
-      els.pendingList.innerHTML = '';
-      els.pendingEmpty.hidden = false;
-      els.pendingEmpty.querySelector('p').textContent = (pendingChantierFilter === 'tous' && pendingAgenceFilter === 'tous')
-        ? 'Tous les contrats de vos chantiers sont à jour.'
-        : 'Rien à valider pour ce filtre pour le moment.';
-      return;
-    }
-    els.pendingEmpty.hidden = true;
-    els.pendingList.innerHTML = items.map(pendingCardHtml).join('');
-    items.forEach(function(item){
-      wirePanel(item._id, item, VALID_DECISIONS);
-    });
-  }
-
-  function renderPending(allItems){
-    pendingAllItems = allItems;
-    renderPendingList();
-  }
-
-  els.chantierFilter.addEventListener('change', function(){
-    pendingChantierFilter = els.chantierFilter.value;
-    renderPendingList();
-  });
-  els.agenceFilter.addEventListener('change', function(){
-    pendingAgenceFilter = els.agenceFilter.value;
-    renderPendingList();
-  });
-
-  /* ---------- Échéances --------------------------------------------- */
-  var ECH_DECISIONS = [
-    {key:'prolonger', cls:'ok', label:'Prolonger', verbe:'PROLONGATION DEMANDÉE', needsDate:true, prompt:"Indiquez la nouvelle date de fin souhaitée :"},
-    {key:'arreter', cls:'no', label:'Arrêter', verbe:'ARRÊT CONFIRMÉ', prompt:"Confirmez la fin de mission à la date prévue :"},
-    {key:'attente', cls:'wait', label:'Pas encore décidé', verbe:'EN ATTENTE', prompt:"Pas de souci, vous pourrez revenir sur cette échéance plus tard."},
-  ];
-
-  function echeanceCardHtml(item){
-    var id = nextId();
-    item._id = id;
-    var badge = item.enRetard
-      ? '<span class="chip bad">Échéance dépassée</span>'
-      : (item.joursRestants <= 7 ? '<span class="chip warn">J-' + item.joursRestants + '</span>' : '<span class="chip">J-' + item.joursRestants + '</span>');
-    return '<article class="card">' +
-      '<div class="card-head">' +
-        '<div class="who"><div class="name">' + escapeHtml(item.interimaire) + '</div>' +
-        '<div class="qual">' + escapeHtml(item.qualification || '—') + '</div></div>' +
-        badge +
-      '</div>' +
-      '<div class="grid" style="margin-top:9px; padding-top:9px">' +
-        '<div class="cell"><div class="lbl">Fin ferme</div><div class="val tabular">' + escapeHtml(item.finFerme||'—') + '</div></div>' +
-        '<div class="cell"><div class="lbl">Contrat</div><div class="val tabular">' + escapeHtml(item.contrat) + '</div></div>' +
-      '</div>' +
-      buildPanel(id, ECH_DECISIONS) +
-    '</article>';
-  }
-
-  function renderEcheances(slug){
-    var c = DATA.echeances[slug];
-    var allChantiers = c ? c.chantiers : [];
-    var chantiers = allChantiers.map(function(g){
-      return { chantier: g.chantier, items: g.items.filter(function(it){ return !isDecided(it); }) };
-    }).filter(function(g){ return g.items.length > 0; });
-    var total = chantiers.reduce(function(n, g){ return n + g.items.length; }, 0);
-    els.countEcheances.textContent = total;
-    if (!total){
-      els.echeancesGroups.innerHTML = '';
-      els.echeancesEmpty.hidden = false;
-      return;
-    }
-    els.echeancesEmpty.hidden = true;
-    els.echeancesGroups.innerHTML = chantiers.map(function(g){
-      return '<div class="site-group">' +
-        '<h2><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-7.2 7-12a7 7 0 10-14 0c0 4.8 7 12 7 12z"/><circle cx="12" cy="9" r="2.3"/></svg>' +
-        escapeHtml(g.chantier) + ' <span class="count">(' + g.items.length + ')</span></h2>' +
-        '<div class="list" style="padding-top:0">' + g.items.map(echeanceCardHtml).join('') + '</div>' +
-      '</div>';
-    }).join('');
-    chantiers.forEach(function(g){
-      g.items.forEach(function(item){
-        wirePanel(item._id, item, ECH_DECISIONS);
-      });
-    });
-  }
-
-  /* ---------- Historique ---------------------------------------------- */
+  function money(v){ return (typeof v === 'number') ? v.toFixed(2).replace('.', ',') : '—'; }
+  function plural(n, one, many){ return n + ' ' + (n > 1 ? many : one); }
+  function noAccent(s){ return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, ''); }
   function parseFR(d){
-    if (!d) return 0;
-    var p = d.split('/');
-    return p.length === 3 ? Date.UTC(+p[2], +p[1]-1, +p[0]) : 0;
+    var m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(d || '');
+    return m ? new Date(+m[3], +m[2] - 1, +m[1]) : null;
+  }
+  function isoToFR(iso){
+    var p = (iso || '').split('-');
+    return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : null;
+  }
+  var MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+  function moisKey(d){ var x = parseFR(d); return x ? x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') : ''; }
+  function moisLabel(k){ if (!k) return 'Date inconnue'; var p = k.split('-'); return MOIS[+p[1] - 1] + ' ' + p[0]; }
+
+  // Les intitulés de poste arrivent sous des formes très variées
+  // ("COFFREUR N2 185", "Coffreur N2 Pcs:621b Niv:coffreu"...) : on garde
+  // le métier seul pour que le filtre "Poste" reste court et lisible.
+  var POSTE_ALIAS = { 'GRUTIER A TOUR': 'GRUTIER' };
+  function posteKey(q){
+    if (!q) return '';
+    var s = noAccent(q).toUpperCase().trim();
+    s = s.split(/\s+(?=N\d|PCS:|COEF|NIV:|\(|P\d\b)/)[0].replace(/\s+\d+$/, '').trim();
+    return POSTE_ALIAS[s] || s;
+  }
+  function posteLabel(k){
+    if (!k) return 'Non précisé';
+    var s = k.toLowerCase()
+      .replace(/\bmacon/g, 'maçon').replace(/\bequipe/g, 'équipe')
+      .replace(/manoeuvre/g, 'manœuvre').replace(/\bferailleur/g, 'ferrailleur');
+    return s.charAt(0).toUpperCase() + s.slice(1);
   }
 
-  function historyRowHtml(item){
-    var label = {valide:'Validé', refuse:'Refusé', prolonge:'Prolongation demandée', arrete:'Arrêt confirmé'}[item.statut] || item.statut;
-    var cls = {valide:'ok', refuse:'no', prolonge:'ok', arrete:'no'}[item.statut] || 'wait';
-    return '<article class="card hist">' +
-      '<div class="card-head">' +
-        '<div class="who"><div class="name">' + escapeHtml(item.interimaire) + '</div>' +
-        '<div class="qual">' + escapeHtml(item.chantier || '—') + ' · Contrat ' + escapeHtml(item.contrat) + '</div></div>' +
-        '<span class="chip ' + cls + '">' + label + '</span>' +
+  var PIN = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 21s7-7.2 7-12a7 7 0 10-14 0c0 4.8 7 12 7 12z"/><circle cx="12" cy="9" r="2.3"/></svg>';
+  var STATUT = { ok:'valide', no:'refuse', prolonger:'prolonge', arreter:'arrete', attente:'attente' };
+  var STATUT_LABEL = { valide:'Validé', refuse:'Refusé', prolonge:'Prolongation demandée', arrete:'Arrêt confirmé' };
+  var STATUT_CLS = { valide:'ok', refuse:'bad', prolonge:'ok', arrete:'bad' };
+
+  /* ---------- etat ---------- */
+  var SLUG = null, TOKEN = null;
+  var pending = [], echeances = [];   // objets contrat
+  var byContrat = {};                 // contrat -> [objets] (un contrat peut être dans les deux listes)
+  var tab = 'pending';
+  var filters = { chantier:'', poste:'', mois:'', agence:'', q:'' };
+
+  function isDecided(it){ return !!it.statut && it.statut !== 'attente'; }
+
+  function prep(it, chantier){
+    if (!it.chantier && chantier) it.chantier = chantier;
+    it._poste = posteKey(it.qualification);
+    it._mois = moisKey(it.nouvelleDateFin || it.finFerme);
+    it._q = noAccent(it.interimaire + ' ' + it.contrat).toLowerCase();
+    (byContrat[it.contrat] = byContrat[it.contrat] || []).push(it);
+    return it;
+  }
+
+  function itemsOfTab(t){
+    if (t === 'pending') return pending.filter(function(it){ return !isDecided(it); });
+    if (t === 'echeances') return echeances.filter(function(it){ return !isDecided(it); });
+    var seen = {};
+    return pending.concat(echeances).filter(function(it){
+      if (!isDecided(it) || seen[it.contrat]) return false;
+      return (seen[it.contrat] = true);
+    }).sort(function(a, b){ return (parseFR(b.valideLe) || 0) - (parseFR(a.valideLe) || 0); });
+  }
+
+  var FIELD = { chantier: function(it){ return it.chantier || ''; }, poste: function(it){ return it._poste; }, mois: function(it){ return it._mois; }, agence: function(it){ return it.agence || ''; } };
+  function matches(it, except){
+    for (var k in FIELD){
+      if (k !== except && filters[k] && FIELD[k](it) !== filters[k]) return false;
+    }
+    if (filters.q){
+      var words = noAccent(filters.q).toLowerCase().split(/\s+/).filter(Boolean);
+      for (var i = 0; i < words.length; i++) if (it._q.indexOf(words[i]) === -1) return false;
+    }
+    return true;
+  }
+  function hasFilters(){ return !!(filters.chantier || filters.poste || filters.mois || filters.agence || filters.q); }
+
+  /* ---------- filtres ---------- */
+  var LABEL = { chantier: function(v){ return v || 'Sans chantier'; }, poste: posteLabel, mois: moisLabel, agence: function(v){ return v || 'Sans agence'; } };
+  var ALL = { chantier:'Tous', poste:'Tous', mois:'Tous', agence:'Toutes' };
+  function fillSelects(items){
+    Object.keys(FIELD).forEach(function(k){
+      var sel = $('f-' + k), counts = {};
+      // compte chaque valeur en tenant compte des AUTRES filtres
+      items.forEach(function(it){ if (matches(it, k)){ var v = FIELD[k](it); counts[v] = (counts[v] || 0) + 1; } });
+      if (filters[k] && !(filters[k] in counts)) counts[filters[k]] = 0;
+      var keys = Object.keys(counts).sort(function(a, b){
+        if (k === 'mois') return a < b ? -1 : a > b ? 1 : 0;
+        return LABEL[k](a).localeCompare(LABEL[k](b), 'fr');
+      });
+      var total = items.filter(function(it){ return matches(it, k); }).length;
+      sel.innerHTML = '<option value="">' + ALL[k] + ' (' + total + ')</option>' + keys.map(function(v){
+        return '<option value="' + esc(v) + '">' + esc(LABEL[k](v)) + ' (' + counts[v] + ')</option>';
+      }).join('');
+      sel.value = filters[k];
+      sel.classList.toggle('active', !!filters[k]);
+    });
+    // agence : seulement utile s'il y en a plusieurs
+    var agences = {};
+    pending.concat(echeances).forEach(function(it){ agences[it.agence || ''] = 1; });
+    $('field-agence').hidden = Object.keys(agences).length < 2 && !filters.agence;
+  }
+  Object.keys(FIELD).forEach(function(k){
+    $('f-' + k).addEventListener('change', function(e){ filters[k] = e.target.value; render(); });
+  });
+  var qTimer = null;
+  $('q').addEventListener('input', function(e){
+    clearTimeout(qTimer);
+    qTimer = setTimeout(function(){ filters.q = e.target.value.trim(); render(); }, 150);
+  });
+  function clearFilters(){
+    filters = { chantier:'', poste:'', mois:'', agence:'', q:'' };
+    $('q').value = '';
+    render();
+  }
+  $('clearFilters').addEventListener('click', clearFilters);
+
+  /* ---------- appels serveur ---------- */
+  function sendDecision(contrats, decision, extra){
+    return fetch('/api/decision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({ contrats: contrats, decision: decision, slug: SLUG, token: TOKEN }, extra || {}))
+    }).then(function(r){
+      if (r.status === 401 || r.status === 403) throw new Error('acces');
+      if (!r.ok) throw new Error('http');
+      return r.json();
+    });
+  }
+  function applyLocal(contrats, decision, extra){
+    var today = new Date();
+    var fr = String(today.getDate()).padStart(2, '0') + '/' + String(today.getMonth() + 1).padStart(2, '0') + '/' + today.getFullYear();
+    contrats.forEach(function(c){
+      (byContrat[c] || []).forEach(function(it){
+        it.statut = STATUT[decision];
+        it.commentaire = (extra && extra.commentaire) || null;
+        it.valideLe = decision === 'attente' ? null : fr;
+        if (extra && extra.nouvelleDateFin) it.nouvelleDateFin = extra.nouvelleDateFin; else delete it.nouvelleDateFin;
+      });
+    });
+  }
+  function errorText(e){
+    return e && e.message === 'acces'
+      ? "Ce contrat ne vous est plus attribué, ou votre lien a changé. Rechargez la page ou contactez le service RH."
+      : "Pas de connexion ? L'enregistrement a échoué, réessayez.";
+  }
+
+  /* ---------- toast + annuler ---------- */
+  var toastTimer = null, undoFn = null;
+  function toast(msg, onUndo, isError){
+    clearTimeout(toastTimer);
+    $('toastMsg').textContent = msg;
+    $('toast').classList.toggle('error', !!isError);
+    undoFn = onUndo || null;
+    $('toastUndo').hidden = !onUndo;
+    $('toast').hidden = false;
+    toastTimer = setTimeout(function(){ $('toast').hidden = true; undoFn = null; }, onUndo ? 7000 : 4000);
+  }
+  $('toastUndo').addEventListener('click', function(){
+    var fn = undoFn; undoFn = null; $('toast').hidden = true;
+    if (fn) fn();
+  });
+  function undoable(contrats){
+    var prev = contrats.map(function(c){ var it = byContrat[c][0]; return { c: c, statut: it.statut, commentaire: it.commentaire, valideLe: it.valideLe, nouvelleDateFin: it.nouvelleDateFin }; });
+    return function(){
+      sendDecision(contrats, 'attente').then(function(){
+        prev.forEach(function(p){ (byContrat[p.c] || []).forEach(function(it){ it.statut = 'attente'; it.commentaire = null; it.valideLe = null; delete it.nouvelleDateFin; }); });
+        render();
+        toast(contrats.length > 1 ? 'Annulé : les ' + contrats.length + ' contrats sont de nouveau à traiter.' : 'Annulé : le contrat est de nouveau à traiter.');
+      }).catch(function(e){ toast(errorText(e), null, true); });
+    };
+  }
+
+  // retire la carte en douceur puis redessine
+  function decideAndAnimate(card, contrats, decision, extra, msg){
+    var btns = card ? card.querySelectorAll('button') : [];
+    Array.prototype.forEach.call(btns, function(b){ b.disabled = true; });
+    return sendDecision(contrats, decision, extra).then(function(){
+      applyLocal(contrats, decision, extra);
+      toast(msg, decision === 'attente' ? null : undoable(contrats));
+      if (card){ card.classList.add('leaving'); setTimeout(render, 230); } else render();
+    }).catch(function(e){
+      Array.prototype.forEach.call(btns, function(b){ b.disabled = false; });
+      toast(errorText(e), null, true);
+      throw e;
+    });
+  }
+
+  /* ---------- cartes ---------- */
+  function head(it, badge){
+    var raw = it.qualification && posteLabel(it._poste).toUpperCase() !== noAccent(it.qualification).toUpperCase() ? ' <small>· ' + esc(it.qualification) + '</small>' : '';
+    return '<div class="card-head"><div class="who">' +
+        '<div class="name">' + esc(it.interimaire) + '</div>' +
+        '<div class="poste">' + esc(posteLabel(it._poste)) + raw + '</div>' +
+      '</div>' + (badge || '') + '</div>';
+  }
+  function metaRow(it, withAgence){
+    return '<div class="meta"><span class="site">' + PIN + esc(it.chantier || '—') + '</span>' +
+      (withAgence && it.agence ? '<span>' + esc(it.agence) + '</span>' : '') +
+      '<span class="tabular">N° ' + esc(it.contrat) + '</span></div>';
+  }
+
+  function pendingCard(it){
+    return '<article class="card" data-contrat="' + esc(it.contrat) + '">' +
+      head(it) + metaRow(it, true) +
+      '<div class="facts">' +
+        '<div class="fact"><div class="lbl">Fin de contrat</div><div class="val big tabular">' + esc(it.finFerme || '—') + '</div>' +
+          '<div class="sub tabular">Début ' + esc(it.debutMission || '—') + '</div></div>' +
+        '<div class="fact"><div class="lbl">Salaire / facturé</div><div class="val big tabular">' + money(it.salaire) + ' / ' + money(it.tarifFacture) + ' €</div>' +
+          '<div class="sub tabular">' + (it.heuresSemaine != null ? esc(it.heuresSemaine) + ' h / semaine' : '') + '</div></div>' +
       '</div>' +
-      (item.nouvelleDateFin ? '<div class="hist-detail">Nouvelle date de fin demandée : <b class="tabular">' + escapeHtml(item.nouvelleDateFin) + '</b></div>' : '') +
-      (item.commentaire ? '<div class="hist-detail muted">“' + escapeHtml(item.commentaire) + '”</div>' : '') +
-      '<div class="hist-date">Le ' + escapeHtml(item.valideLe || '—') + '</div>' +
+      '<details class="more"><summary>Plus de détails</summary><div class="facts">' +
+        '<div class="fact"><div class="lbl">Souplesse</div><div class="val tabular">' + esc(it.debutSouplesse || '—') + ' → ' + esc(it.finSouplesse || '—') + '</div></div>' +
+        '<div class="fact"><div class="lbl">THM 42h / 39h</div><div class="val tabular">' + money(it.thm42) + ' / ' + money(it.thm39) + ' €</div></div>' +
+      '</div></details>' +
+      '<div class="actions">' +
+        '<button class="btn no" data-act="refuse" aria-pressed="false">Refuser</button>' +
+        '<button class="btn go" data-act="ok">✓ Valider</button>' +
+      '</div>' +
+      '<div class="panel" hidden>' +
+        '<label for="r-' + esc(it.contrat) + '">Motif du refus</label>' +
+        '<textarea id="r-' + esc(it.contrat) + '" placeholder="Ex. : mauvais taux, mauvais chantier, plus besoin…"></textarea>' +
+        '<div class="row"><button class="cancel" data-act="close">Annuler</button><button class="submit danger" data-act="confirm-refuse">Confirmer le refus</button></div>' +
+      '</div>' +
     '</article>';
   }
 
-  function renderHistory(slug){
-    var c = DATA.conducteurs[slug] || {items:[]};
-    var ech = DATA.echeances[slug] ? DATA.echeances[slug].chantiers : [];
-    var items = c.items.filter(isDecided).concat(
-      ech.reduce(function(acc, g){ return acc.concat(g.items.filter(isDecided).map(function(it){ return Object.assign({}, it, {chantier: it.chantier || g.chantier}); })); }, [])
-    );
-    items.sort(function(a, b){ return parseFR(b.valideLe) - parseFR(a.valideLe); });
-    els.countHistory.textContent = items.length;
-    if (!items.length){
-      els.historyList.innerHTML = '';
-      els.historyEmpty.hidden = false;
-      return;
+  function echeanceCard(it){
+    var fin = parseFR(it.finFerme);
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var j = fin ? Math.round((fin - today) / 86400000) : it.joursRestants;
+    var badge = (j != null && j < 0) || it.enRetard
+      ? '<span class="chip bad">Dépassée</span>'
+      : (j === 0 ? '<span class="chip warn">Aujourd’hui</span>' : '<span class="chip' + (j <= 7 ? ' warn' : '') + '">Dans ' + plural(j, 'jour', 'jours') + '</span>');
+    var minDate = new Date(Math.max(Date.now(), fin ? fin.getTime() : 0));
+    var minIso = minDate.getFullYear() + '-' + String(minDate.getMonth() + 1).padStart(2, '0') + '-' + String(minDate.getDate()).padStart(2, '0');
+    return '<article class="card" data-contrat="' + esc(it.contrat) + '">' +
+      head(it, badge) + metaRow(it, false) +
+      '<div class="facts"><div class="fact"><div class="lbl">Fin prévue</div><div class="val big tabular">' + esc(it.finFerme || '—') + '</div></div>' +
+        '<div class="fact"><div class="lbl">Agence</div><div class="val">' + esc(it.agence || '—') + '</div></div></div>' +
+      '<div class="actions">' +
+        '<button class="btn ok" data-act="prolonger" aria-pressed="false">Prolonger</button>' +
+        '<button class="btn no" data-act="arreter" aria-pressed="false">Arrêter</button>' +
+      '</div>' +
+      '<div class="panel" data-for="prolonger" hidden>' +
+        '<div class="date-field"><label for="d-' + esc(it.contrat) + '">Nouvelle date de fin</label><input type="date" id="d-' + esc(it.contrat) + '" min="' + minIso + '"></div>' +
+        '<textarea placeholder="Commentaire (facultatif)"></textarea>' +
+        '<div class="err" hidden></div>' +
+        '<div class="row"><button class="cancel" data-act="close">Annuler</button><button class="submit" data-act="confirm-prolonger">Demander la prolongation</button></div>' +
+      '</div>' +
+      '<div class="panel" data-for="arreter" hidden>' +
+        '<p>La mission s’arrêtera à la date prévue (<b class="tabular">' + esc(it.finFerme || '—') + '</b>).</p>' +
+        '<textarea placeholder="Commentaire (facultatif)"></textarea>' +
+        '<div class="row"><button class="cancel" data-act="close">Annuler</button><button class="submit danger" data-act="confirm-arreter">Confirmer l’arrêt</button></div>' +
+      '</div>' +
+    '</article>';
+  }
+
+  function historyCard(it){
+    return '<article class="card" data-contrat="' + esc(it.contrat) + '">' +
+      head(it, '<span class="chip ' + (STATUT_CLS[it.statut] || '') + '">' + esc(STATUT_LABEL[it.statut] || it.statut) + '</span>') +
+      metaRow(it, false) +
+      (it.nouvelleDateFin ? '<div class="hist-note">Nouvelle date de fin demandée : <b class="tabular">' + esc(it.nouvelleDateFin) + '</b></div>' : '') +
+      (it.commentaire ? '<div class="hist-note quote">“' + esc(it.commentaire) + '”</div>' : '') +
+      '<div class="hist-foot"><span>Le ' + esc(it.valideLe || '—') + '</span><button class="linkbtn" data-act="reset">Annuler cette décision</button></div>' +
+    '</article>';
+  }
+
+  /* ---------- clics sur les cartes ---------- */
+  function onCardClick(e){
+    var btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    var card = btn.closest('.card');
+    var contrat = card.getAttribute('data-contrat');
+    var act = btn.getAttribute('data-act');
+    var panels = card.querySelectorAll('.panel');
+    function openPanel(name){
+      Array.prototype.forEach.call(panels, function(p){ p.hidden = (p.getAttribute('data-for') || 'refuse') !== name; });
+      Array.prototype.forEach.call(card.querySelectorAll('.actions .btn'), function(b){ b.setAttribute('aria-pressed', String(b.getAttribute('data-act') === name)); });
+      var p = card.querySelector(name === 'refuse' ? '.panel' : '.panel[data-for="' + name + '"]');
+      var f = p && p.querySelector('input, textarea');
+      if (f) f.focus();
     }
-    els.historyEmpty.hidden = true;
-    els.historyList.innerHTML = items.map(historyRowHtml).join('');
-  }
-
-  /* ---------- Routage ------------------------------------------------ */
-  function showTab(which){
-    els.pendingView.hidden = which !== 'pending';
-    els.echeancesView.hidden = which !== 'echeances';
-    els.historyView.hidden = which !== 'history';
-    els.tabPending.setAttribute('aria-selected', String(which === 'pending'));
-    els.tabEcheances.setAttribute('aria-selected', String(which === 'echeances'));
-    els.tabHistory.setAttribute('aria-selected', String(which === 'history'));
-  }
-  els.tabPending.addEventListener('click', function(){ showTab('pending'); });
-  els.tabEcheances.addEventListener('click', function(){ showTab('echeances'); });
-  els.tabHistory.addEventListener('click', function(){ showTab('history'); });
-
-  // STAM V6 - chaque conducteur a desormais son propre lien personnel
-  // (/c/<slug>), demande explicite de Laura Peyre le 15/10/2026 ("chaque
-  // conducteur puisse voir ses contrats en cours comme un cockpit") : plus
-  // de liste de tous les conducteurs exposee publiquement, on atterrit
-  // directement sur SON cockpit (a valider / echeances / historique), sans
-  // bouton pour aller voir les contrats de quelqu'un d'autre.
-  function slugFromPath(){
-    var m = location.pathname.match(/^\/c\/([^/]+)\/?$/);
-    return m ? decodeURIComponent(m[1]) : null;
-  }
-
-  function renderConducteur(slug){
-    var c = DATA.conducteurs[slug] || {nom:'', items:[]};
-    var pendingCount = c.items.filter(function(it){ return !isDecided(it); }).length;
-    els.pageTitle.textContent = c.nom;
-    els.subtitle.innerHTML = 'Contrats sur vos chantiers — <strong>' + pendingCount + '</strong> en attente de validation.';
-    els.tabs.hidden = false;
-    els.switcher.hidden = true;
-    els.overviewView.hidden = true;
-    els.backBtn.hidden = true;
-    els.countPending.textContent = pendingCount;
-    onDecided = function(){
-      els.countPending.textContent = c.items.filter(function(it){ return !isDecided(it); }).length;
-      els.subtitle.innerHTML = 'Contrats sur vos chantiers — <strong>' + c.items.filter(function(it){ return !isDecided(it); }).length + '</strong> en attente de validation.';
-      renderHistory(slug);
-    };
-    renderPending(c.items);
-    renderEcheances(slug);
-    renderHistory(slug);
-    showTab('pending');
-  }
-
-  function renderInvalidLink(){
-    els.pageTitle.textContent = "Contrats à valider";
-    els.subtitle.textContent = "Lien invalide.";
-    els.tabs.hidden = true;
-    els.overviewView.hidden = true;
-    els.backBtn.hidden = true;
-    els.pendingView.hidden = true;
-    els.echeancesView.hidden = true;
-    els.historyView.hidden = true;
-    els.switcher.hidden = false;
-    els.switcher.innerHTML = '<div class="empty" style="margin-top:8px">' +
-      '<div class="big">Lien invalide ou expiré</div>' +
-      '<p>Ce lien personnel ne correspond à aucun conducteur connu. Contactez le service RH pour obtenir votre lien à jour.</p></div>';
-  }
-
-  function renderLanding(){
-    els.pageTitle.textContent = "Contrats à valider";
-    els.subtitle.textContent = "Utilisez votre lien personnel pour voir vos contrats.";
-    els.tabs.hidden = true;
-    els.switcher.hidden = false;
-    els.overviewView.hidden = true;
-    els.backBtn.hidden = true;
-    els.pendingView.hidden = true;
-    els.echeancesView.hidden = true;
-    els.historyView.hidden = true;
-  }
-
-  function route(){
-    var pathSlug = slugFromPath();
-    if (pathSlug){
-      if (DATA.conducteurs[pathSlug]) renderConducteur(pathSlug);
-      else renderInvalidLink();
-      return;
+    function closePanels(){
+      Array.prototype.forEach.call(panels, function(p){ p.hidden = true; });
+      Array.prototype.forEach.call(card.querySelectorAll('.actions .btn'), function(b){ b.setAttribute('aria-pressed', 'false'); });
     }
-    renderLanding();
+    function comment(){ var p = btn.closest('.panel'); var t = p && p.querySelector('textarea'); return t ? t.value.trim() : ''; }
+
+    if (act === 'ok') decideAndAnimate(card, [contrat], 'ok', null, 'Contrat validé.').catch(function(){});
+    else if (act === 'refuse' || act === 'prolonger' || act === 'arreter'){
+      if (btn.getAttribute('aria-pressed') === 'true') closePanels(); else openPanel(act);
+    }
+    else if (act === 'close') closePanels();
+    else if (act === 'confirm-refuse') decideAndAnimate(card, [contrat], 'no', { commentaire: comment() }, 'Contrat refusé.').catch(function(){});
+    else if (act === 'confirm-arreter') decideAndAnimate(card, [contrat], 'arreter', { commentaire: comment() }, 'Arrêt confirmé.').catch(function(){});
+    else if (act === 'confirm-prolonger'){
+      var p = btn.closest('.panel');
+      var d = isoToFR(p.querySelector('input[type=date]').value);
+      var err = p.querySelector('.err');
+      if (!d){ err.textContent = 'Choisissez la nouvelle date de fin.'; err.hidden = false; return; }
+      err.hidden = true;
+      decideAndAnimate(card, [contrat], 'prolonger', { commentaire: comment(), nouvelleDateFin: d }, 'Prolongation demandée.').catch(function(){});
+    }
+    else if (act === 'reset'){
+      decideAndAnimate(card, [contrat], 'attente', null, 'Décision annulée : le contrat est de nouveau à traiter.').catch(function(){});
+    }
+  }
+  ['list-pending', 'list-echeances', 'list-history'].forEach(function(id){ $(id).addEventListener('click', onCardClick); });
+
+  /* ---------- tout valider ---------- */
+  var visiblePending = [];
+  $('bulkStart').addEventListener('click', function(){
+    var n = visiblePending.length;
+    var detail = [];
+    if (filters.chantier) detail.push('chantier ' + filters.chantier);
+    if (filters.poste) detail.push(posteLabel(filters.poste).toLowerCase());
+    if (filters.mois) detail.push('fin en ' + moisLabel(filters.mois).toLowerCase());
+    if (filters.agence) detail.push(filters.agence);
+    if (filters.q) detail.push('« ' + filters.q + ' »');
+    $('bulkText').innerHTML = 'Valider <strong>' + plural(n, 'contrat', 'contrats') + '</strong>' +
+      (detail.length ? ' (' + esc(detail.join(', ')) + ')' : ', c’est-à-dire tous vos contrats en attente') + ' ?';
+    $('bulkGo').textContent = 'Oui, valider les ' + n;
+    $('bulkStart').hidden = true; $('bulkConfirm').hidden = false; $('bulkErr').hidden = true;
+  });
+  $('bulkCancel').addEventListener('click', function(){ $('bulkStart').hidden = false; $('bulkConfirm').hidden = true; });
+  $('bulkGo').addEventListener('click', function(){
+    var contrats = visiblePending.map(function(it){ return it.contrat; });
+    $('bulkGo').disabled = $('bulkCancel').disabled = true;
+    $('bulkGo').textContent = 'Enregistrement…';
+    sendDecision(contrats, 'ok').then(function(){
+      applyLocal(contrats, 'ok');
+      $('bulkStart').hidden = false; $('bulkConfirm').hidden = true;
+      toast(plural(contrats.length, 'contrat validé', 'contrats validés') + '.', undoable(contrats));
+      render();
+    }).catch(function(e){
+      $('bulkErr').textContent = errorText(e); $('bulkErr').hidden = false;
+      $('bulkGo').textContent = 'Réessayer';
+    }).then(function(){ $('bulkGo').disabled = $('bulkCancel').disabled = false; });
+  });
+
+  /* ---------- rendu ---------- */
+  function render(){
+    var all = itemsOfTab(tab);
+    fillSelects(all);
+    var shown = all.filter(function(it){ return matches(it); });
+
+    var nPending = itemsOfTab('pending').length;
+    $('n-pending').textContent = nPending;
+    $('n-echeances').textContent = itemsOfTab('echeances').length;
+    $('n-history').textContent = itemsOfTab('history').length;
+    $('subtitle').innerHTML = nPending
+      ? '<strong>' + plural(nPending, 'contrat', 'contrats') + '</strong> à valider'
+      : 'Tout est à jour, merci !';
+
+    $('resultCount').innerHTML = hasFilters()
+      ? '<strong>' + shown.length + '</strong> sur ' + all.length + ' affiché' + (shown.length > 1 ? 's' : '')
+      : plural(all.length, 'contrat', 'contrats');
+    $('clearFilters').hidden = !hasFilters();
+
+    ['pending', 'echeances', 'history'].forEach(function(t){
+      $('view-' + t).hidden = t !== tab;
+      $('tab-' + t).setAttribute('aria-selected', String(t === tab));
+    });
+
+    if (tab === 'pending'){
+      visiblePending = shown;
+      $('list-pending').innerHTML = shown.map(pendingCard).join('');
+      $('bulk').hidden = shown.length < 2;
+      if ($('bulkConfirm').hidden) $('bulkStart').textContent = '✓ Tout valider (' + shown.length + ')';
+      else { $('bulkStart').hidden = false; $('bulkConfirm').hidden = true; $('bulkStart').textContent = '✓ Tout valider (' + shown.length + ')'; }
+    } else if (tab === 'echeances'){
+      var groups = {}, order = [];
+      shown.slice().sort(function(a, b){ return (parseFR(a.finFerme) || 0) - (parseFR(b.finFerme) || 0); }).forEach(function(it){
+        var g = it.chantier || '—';
+        if (!groups[g]){ groups[g] = []; order.push(g); }
+        groups[g].push(it);
+      });
+      $('list-echeances').innerHTML = order.map(function(g){
+        return '<div class="site-group"><h2>' + PIN + esc(g) + ' <span class="count">(' + groups[g].length + ')</span></h2>' +
+          '<div class="list">' + groups[g].map(echeanceCard).join('') + '</div></div>';
+      }).join('');
+    } else {
+      $('list-history').innerHTML = shown.map(historyCard).join('');
+    }
+
+    var empty = $('emptyBox');
+    if (shown.length){ empty.hidden = true; }
+    else {
+      empty.hidden = false;
+      if (all.length && hasFilters()){
+        empty.innerHTML = '<div class="big">Aucun contrat pour ces filtres</div><p>Essayez un autre chantier, poste ou mois.</p><button class="linkbtn" id="emptyClear">Effacer les filtres</button>';
+        $('emptyClear').addEventListener('click', clearFilters);
+      } else {
+        empty.innerHTML = {
+          pending: '<div class="big">Rien à valider 🎉</div><p>Tous les contrats de vos chantiers sont validés ou refusés.</p>',
+          echeances: '<div class="big">Aucune fin de contrat proche</div><p>Aucun contrat de vos chantiers n’arrive à échéance dans les prochaines semaines.</p>',
+          history: '<div class="big">Pas encore de décision</div><p>Chaque contrat validé, refusé, prolongé ou arrêté apparaîtra ici, avec la date et le commentaire.</p>'
+        }[tab];
+      }
+    }
   }
 
-  function boot(data){
-    DATA = data;
-    els.genTime.textContent = "maj " + DATA.genereLe;
-    route();
+  Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(b){
+    b.addEventListener('click', function(){ tab = b.getAttribute('data-tab'); render(); window.scrollTo(0, 0); });
+  });
+
+  /* ---------- demarrage ---------- */
+  function showMessage(title, text){
+    $('pageTitle').textContent = 'Contrats à valider';
+    $('subtitle').textContent = '';
+    $('app').hidden = true; $('tabs').hidden = true;
+    $('message').hidden = false;
+    $('message').innerHTML = '<div class="empty"><div class="big">' + esc(title) + '</div><p>' + esc(text) + '</p></div>';
   }
-  fetch('/api/data.json').then(function(r){
-    if (!r.ok) throw new Error('http ' + r.status);
+
+  var m = location.pathname.match(/^\/c\/([^/]+)(?:\/([^/]+))?\/?$/);
+  if (!m){
+    showMessage('Lien personnel requis', "Cette page affiche les contrats d'un conducteur via son lien personnel. Si vous n'avez pas reçu le vôtre, contactez le service RH.");
+    return;
+  }
+  if (!m[2]){
+    showMessage('Ce lien a changé', "Pour protéger les informations des contrats, les liens personnels ont été renouvelés. Demandez votre nouveau lien au service RH.");
+    return;
+  }
+  SLUG = decodeURIComponent(m[1]); TOKEN = m[2];
+
+  fetch('/api/moi/' + encodeURIComponent(SLUG) + '/' + encodeURIComponent(TOKEN), { cache: 'no-store' }).then(function(r){
+    if (r.status === 404) throw new Error('lien');
+    if (!r.ok) throw new Error('http');
     return r.json();
-  }).then(boot).catch(function(e){
-    document.querySelector('.wrap').innerHTML =
-      '<div class="empty" style="margin-top:60px"><div class="big">Donn\u00e9es indisponibles</div>' +
-      '<p>Impossible de charger les contrats pour le moment. R\u00e9essayez dans une minute, ou pr\u00e9venez le service RH si \u00e7a persiste.</p></div>';
+  }).then(function(data){
+    $('genTime').textContent = 'Mis à jour le ' + (data.genereLe || '—');
+    $('pageTitle').textContent = data.nom || 'Mes contrats';
+    document.title = 'Contrats — ' + (data.nom || 'STAM');
+    pending = (data.items || []).map(function(it){ return prep(it); });
+    (data.echeances || []).forEach(function(g){ (g.items || []).forEach(function(it){ echeances.push(prep(it, g.chantier)); }); });
+    $('tabs').hidden = false; $('app').hidden = false;
+    render();
+  }).catch(function(e){
+    if (e.message === 'lien') showMessage('Lien invalide ou expiré', "Ce lien ne correspond à aucun conducteur. Demandez votre lien à jour au service RH.");
+    else showMessage('Données indisponibles', 'Impossible de charger les contrats pour le moment. Réessayez dans une minute (le site peut mettre 30 secondes à se réveiller).');
   });
 })();
 </script>
+</body>
+</html>

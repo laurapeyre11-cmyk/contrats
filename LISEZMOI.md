@@ -125,12 +125,41 @@ réveil — comme avant cette étape.
 
 ## Étape 7 — Lien personnel de chaque conducteur
 
-Chaque conducteur a maintenant son propre lien, du type
-`https://contrats.onrender.com/c/jean-dupont` : il atterrit directement sur
-SES contrats (à valider, échéances, historique), sans jamais voir ceux des
-autres. Pour récupérer ces liens : ouvre `/dashboard` → onglet
-**"Liens conducteurs"** → bouton **Copier** sur chaque ligne. À toi de les
-transmettre (SMS, en main propre, etc. — comme tu préfères).
+Chaque conducteur a son propre lien secret, du type
+`https://contrats.onrender.com/c/jean-dupont/Xk3p9QmZ2rT8wLc5aB1d` : il
+atterrit directement sur SES contrats (à valider, fins proches,
+historique), sans jamais voir ceux des autres. La fin du lien est un code
+impossible à deviner : sans lui, la page n'affiche rien, et un conducteur
+ne peut valider ou refuser que ses propres contrats.
+
+Pour récupérer ces liens : ouvre `/dashboard` → onglet **"Liens
+conducteurs"** → bouton **Copier** sur chaque ligne. À toi de les
+transmettre (SMS, en main propre, etc.).
+
+**Les anciens liens (`/c/jean-dupont` sans code) ne marchent plus** depuis
+le 05/11/2026 : la page affiche « Ce lien a changé ». Envoie une fois le
+nouveau lien à chaque conducteur.
+
+Le code est calculé à partir de `REFRESH_SECRET`. Si tu changes un jour
+`REFRESH_SECRET`, tous les liens changent. Pour éviter ça, tu peux ajouter
+dans Render une variable `LINK_SECRET` (une autre suite de caractères
+aléatoires) : elle est alors utilisée à la place. Attention, l'ajouter
+change aussi les liens une fois.
+
+### Ce que voit le conducteur
+
+- **Filtres** : chantier, poste, mois de fin de contrat (et agence s'il y
+  en a plusieurs), plus une recherche par nom. Ils marchent sur les trois
+  onglets.
+- **Valider** : un seul appui. Un bandeau « Annuler » reste quelques
+  secondes en cas d'erreur.
+- **Refuser** : demande un motif.
+- **Tout valider** : valide d'un coup tous les contrats affichés (par
+  exemple tout un chantier après avoir choisi le filtre), avec une
+  confirmation avant.
+- **Fins proches** : prolonger (avec la nouvelle date) ou arrêter.
+- **Historique** : chaque décision peut être annulée (« Annuler cette
+  décision »).
 
 ## Étape 8 — Mail à chaque décision (optionnel)
 
