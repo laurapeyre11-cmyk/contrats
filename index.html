@@ -500,18 +500,24 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
       '<span class="tabular">N° ' + esc(it.contrat) + '</span></div>';
   }
 
+  // THM 42h calculé par le moteur V6 (MTT 42h / 42) : le taux de référence
+  function thmFact(it){
+    return '<div class="fact"><div class="lbl">THM 42h</div><div class="val big tabular">' + money(it.thm42) + ' €/h</div>' +
+      '<div class="sub tabular">THM 39h : ' + money(it.thm39) + ' €/h</div></div>';
+  }
+
   function pendingCard(it){
     return '<article class="card" data-contrat="' + esc(it.contrat) + '">' +
       head(it) + metaRow(it, true) +
       '<div class="facts">' +
         '<div class="fact"><div class="lbl">Fin de contrat</div><div class="val big tabular">' + esc(it.finFerme || '—') + '</div>' +
           '<div class="sub tabular">Début ' + esc(it.debutMission || '—') + '</div></div>' +
-        '<div class="fact"><div class="lbl">Salaire / facturé</div><div class="val big tabular">' + money(it.salaire) + ' / ' + money(it.tarifFacture) + ' €</div>' +
-          '<div class="sub tabular">' + (it.heuresSemaine != null ? esc(it.heuresSemaine) + ' h / semaine' : '') + '</div></div>' +
+        thmFact(it) +
       '</div>' +
       '<details class="more"><summary>Plus de détails</summary><div class="facts">' +
         '<div class="fact"><div class="lbl">Souplesse</div><div class="val tabular">' + esc(it.debutSouplesse || '—') + ' → ' + esc(it.finSouplesse || '—') + '</div></div>' +
-        '<div class="fact"><div class="lbl">THM 42h / 39h</div><div class="val tabular">' + money(it.thm42) + ' / ' + money(it.thm39) + ' €</div></div>' +
+        '<div class="fact"><div class="lbl">Salaire / facturé</div><div class="val tabular">' + money(it.salaire) + ' / ' + money(it.tarifFacture) + ' €/h</div>' +
+          '<div class="sub tabular">' + (it.heuresSemaine != null ? esc(it.heuresSemaine) + ' h / semaine' : '') + '</div></div>' +
       '</div></details>' +
       '<div class="actions">' +
         '<button class="btn no" data-act="refuse" aria-pressed="false">Refuser</button>' +
@@ -535,9 +541,9 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     var minDate = new Date(Math.max(Date.now(), fin ? fin.getTime() : 0));
     var minIso = minDate.getFullYear() + '-' + String(minDate.getMonth() + 1).padStart(2, '0') + '-' + String(minDate.getDate()).padStart(2, '0');
     return '<article class="card" data-contrat="' + esc(it.contrat) + '">' +
-      head(it, badge) + metaRow(it, false) +
+      head(it, badge) + metaRow(it, true) +
       '<div class="facts"><div class="fact"><div class="lbl">Fin prévue</div><div class="val big tabular">' + esc(it.finFerme || '—') + '</div></div>' +
-        '<div class="fact"><div class="lbl">Agence</div><div class="val">' + esc(it.agence || '—') + '</div></div></div>' +
+        thmFact(it) + '</div>' +
       '<div class="actions">' +
         '<button class="btn ok" data-act="prolonger" aria-pressed="false">Prolonger</button>' +
         '<button class="btn no" data-act="arreter" aria-pressed="false">Arrêter</button>' +
@@ -568,8 +574,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
       '<div class="facts">' +
         '<div class="fact"><div class="lbl">' + (it.nouvelleDateFin ? 'Nouvelle fin' : 'Fin de contrat') + '</div><div class="val big tabular">' + esc(finEffective(it) || '—') + '</div>' +
           '<div class="sub' + (j != null && j <= 7 ? '" style="color:var(--warn); font-weight:600' : '') + '">' + esc(reste) + '</div></div>' +
-        '<div class="fact"><div class="lbl">Début</div><div class="val big tabular">' + esc(it.debutMission || '—') + '</div>' +
-          '<div class="sub">' + (it.heuresSemaine != null ? esc(it.heuresSemaine) + ' h / semaine' : '') + '</div></div>' +
+        thmFact(it) +
       '</div>' +
       (it.commentaire ? '<div class="hist-note quote">“' + esc(it.commentaire) + '”</div>' : '') +
       '<div class="hist-foot"><span>' + (it.statut === 'prolonge' ? 'Demandée' : 'Validé') + ' le ' + esc(it.valideLe || '—') + '</span><button class="linkbtn" data-act="reset">Annuler</button></div>' +
@@ -755,6 +760,10 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     document.title = 'Contrats — ' + (data.nom || 'STAM');
     pending = (data.items || []).map(function(it){ return prep(it); });
     (data.echeances || []).forEach(function(g){ (g.items || []).forEach(function(it){ echeances.push(prep(it, g.chantier)); }); });
+    // anciennes données : le THM des fins proches est repris du contrat
+    echeances.forEach(function(it){
+      if (it.thm42 == null){ var t = (byContrat[it.contrat] || []).filter(function(x){ return x.thm42 != null; })[0]; if (t){ it.thm42 = t.thm42; it.thm39 = t.thm39; } }
+    });
     $('tabs').hidden = false; $('app').hidden = false;
     render();
   }).catch(function(e){

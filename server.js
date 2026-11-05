@@ -36,7 +36,8 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { construireDepuisExcel } = require('./import_excel');
+const { construireDepuisExcel, slugify: slugImport } = require('./import_excel');
+const { preparerMails } = require('./mails_conducteurs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -676,19 +677,35 @@ async function remplacerDonnees(data, dashboard) {
 // LANCER_MOTEUR_V6_ET_SITE.vbs lance STAM_MOTEUR_V6 puis envoie ici le
 // fichier Excel tel quel (et CONDUCTEURS.xlsx pour les adresses mail).
 // Le site se met donc a jour a chaque signature, sans autre etape.
-// Corps : { validation: <xlsx en base64>, conducteurs?: <xlsx en base64> }
+// Corps : { validation: <xlsx en base64>, conducteurs?: <xlsx en base64>,
+//          mails?: true, connus?: "n1|n2|..." } (les n° peuvent contenir une virgule)
+// Avec mails: true, la reponse contient aussi les mails a envoyer aux
+// conducteurs (voir mails_conducteurs.js) ; "connus" = contrats deja
+// annonces (absent au tout premier envoi). ?format=vbs : reponse en texte
+// simple, lisible par POUSSER_SITE_CONTRATS.vbs.
 // Meme jeton que /api/refresh (en-tete x-refresh-token).
 // ---------------------------------------------------------------------
+function repondreImport(req, res, statut, corps) {
+  if (req.query.format !== 'vbs') return res.status(statut).json(corps);
+  // texte simple : une info par ligne, champs separes par des tabulations,
+  // textes en base64 (UTF-8) pour garder les accents.
+  const b64 = (t) => Buffer.from(String(t == null ? '' : t), 'utf-8').toString('base64');
+  const lignes = [corps.ok ? 'OK' : 'ERREUR', 'MESSAGE\t' + b64(corps.message)];
+  if (corps.connus) lignes.push('CONNUS\t' + b64(corps.connus.join('\n')));
+  (corps.mails || []).forEach((m) => lignes.push(['MAIL', b64(m.a), b64(m.objet), b64(m.html), b64(m.pj.join('|'))].join('\t')));
+  res.status(statut).type('text/plain').send(lignes.join('\n') + '\n');
+}
+
 app.post('/api/import-excel', async (req, res) => {
   const token = req.headers['x-refresh-token'];
   if (!process.env.REFRESH_SECRET) {
-    return res.status(503).json({ ok: false, message: 'REFRESH_SECRET non configure sur Render.' });
+    return repondreImport(req, res, 503, { ok: false, message: 'REFRESH_SECRET non configuré sur Render.' });
   }
   if (!token || !timingSafeEqual(token, process.env.REFRESH_SECRET)) {
-    return res.status(401).json({ ok: false, message: 'Code secret incorrect.' });
+    return repondreImport(req, res, 401, { ok: false, message: 'Code secret incorrect.' });
   }
   const { validation, conducteurs } = req.body || {};
-  if (!validation) return res.status(400).json({ ok: false, message: 'Fichier VALIDATION_CONTRATS.xlsx manquant.' });
+  if (!validation) return repondreImport(req, res, 400, { ok: false, message: 'Fichier VALIDATION_CONTRATS.xlsx manquant.' });
   let resultat;
   try {
     resultat = await construireDepuisExcel(
@@ -698,19 +715,36 @@ app.post('/api/import-excel', async (req, res) => {
     );
   } catch (e) {
     console.error('Import Excel impossible :', e);
-    return res.status(400).json({ ok: false, message: 'Fichier Excel illisible : ' + (e && e.message ? e.message : e) });
+    return repondreImport(req, res, 400, { ok: false, message: 'Fichier Excel illisible : ' + (e && e.message ? e.message : e) });
   }
   if (!resultat.nombre) {
-    return res.status(400).json({ ok: false, message: 'Aucun contrat trouvé dans l\'onglet « A valider » : site non modifié.' });
+    return repondreImport(req, res, 400, { ok: false, message: 'Aucun contrat trouvé dans l\'onglet « A valider » : site non modifié.' });
   }
   const resume = await remplacerDonnees(resultat.data, resultat.dashboard);
   const nbAttente = Object.values(served.data.conducteurs).reduce((n, c) => n + c.items.filter((it) => !it.statut || it.statut === 'attente').length, 0);
-  res.json({
+  let aEnvoyer = null;
+  if (req.body.mails) {
+    const mailsConducteurs = {};
+    (served.dashboard.items || []).forEach((it) => {
+      if (it.conducteurMail) mailsConducteurs[slugImport(it.conducteur)] = it.conducteurMail;
+    });
+    const base = req.protocol + '://' + req.get('host');
+    aEnvoyer = preparerMails({
+      data: served.data,
+      mails: mailsConducteurs,
+      fichiers: resultat.fichiers || {},
+      connus: typeof req.body.connus === 'string' ? new Set(req.body.connus.split(/[\n|]/).map((x) => x.trim()).filter(Boolean)) : null,
+      lienDe: (slug) => base + linkPath(slug),
+    });
+  }
+  repondreImport(req, res, 200, {
     ok: true,
     genereLe: served.data.genereLe,
     contrats: resultat.nombre,
     enAttente: nbAttente,
     sauvegarde: resume.ok,
+    mails: aEnvoyer ? aEnvoyer.mails : undefined,
+    connus: aEnvoyer ? aEnvoyer.connus : undefined,
     message: resultat.nombre + ' contrats envoyés, dont ' + nbAttente + ' à valider.' +
       (resume.ok ? '' : ' ATTENTION : la sauvegarde Upstash a échoué, les données seront perdues à la prochaine mise en veille du site.'),
     upstash: resume,

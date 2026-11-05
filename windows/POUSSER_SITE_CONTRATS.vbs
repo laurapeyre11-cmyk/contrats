@@ -1,31 +1,47 @@
 ' =============================================================================
 ' POUSSER_SITE_CONTRATS.vbs
-' Envoie VALIDATION_CONTRATS.xlsx (et CONDUCTEURS.xlsx) au site des contrats.
-' A placer dans le meme dossier que VALIDATION_CONTRATS.xlsx (#LAURA\Interim).
-' Lance automatiquement par LANCER_MOTEUR_V6_ET_SITE.vbs, ou a la main par
-' double-clic (par exemple apres une modification du fichier Excel).
+' 1. Envoie VALIDATION_CONTRATS.xlsx (et CONDUCTEURS.xlsx) au site des
+'    contrats, qui se met à jour.
+' 2. Envoie depuis Outlook, à chaque conducteur qui a de NOUVEAUX contrats,
+'    le mail « Contrats intérim à valider » avec son lien personnel vers le
+'    site et les PDF signés (dossier TRAITE) en pièces jointes.
 '
-' Au premier lancement, demande l'adresse du site et le code REFRESH_SECRET
-' (Render > service contrats > Environment), puis les garde sur ce PC dans
-' %APPDATA%\STAM\site_contrats.ini.
-' Avec l'argument /silencieux : pas de fenetre si tout s'est bien passe.
+' A placer dans le même dossier que VALIDATION_CONTRATS.xlsx (#LAURA\Interim).
+'
+' Lancement :
+'  - automatique toutes les 10 minutes (tâche Windows créée par
+'    INSTALLER_MISE_A_JOUR_AUTO.vbs) : rien ne s'affiche, et rien n'est
+'    envoyé si VALIDATION_CONTRATS.xlsx n'a pas changé ;
+'  - à la main par double-clic : envoi immédiat, une fenêtre confirme.
+'
+' Réglages gardés sur ce PC dans %APPDATA%\STAM\ :
+'  site_contrats.ini      adresse du site + code secret (REFRESH_SECRET)
+'  contrats_annonces.txt  contrats déjà annoncés aux conducteurs (jamais 2 mails)
+'  site_contrats.log      journal des envois
 ' =============================================================================
 Option Explicit
 
-Dim fso, sh, dossier, silencieux
+Const TITRE = "Site des contrats intérimaires"
+Const EXPEDITEUR = "rh@stam05.fr"
+
+Dim fso, sh, dossier, silencieux, dossierStam
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh = CreateObject("WScript.Shell")
 dossier = fso.GetParentFolderName(WScript.ScriptFullName)
 silencieux = False
 If WScript.Arguments.Count > 0 Then silencieux = (LCase(WScript.Arguments(0)) = "/silencieux")
+dossierStam = sh.ExpandEnvironmentStrings("%APPDATA%") & "\STAM"
+If Not fso.FolderExists(dossierStam) Then fso.CreateFolder dossierStam
 
-Const TITRE = "Site des contrats intérimaires"
+Dim fichierConfig, fichierConnus, fichierJournal
+fichierConfig = dossierStam & "\site_contrats.ini"
+fichierConnus = dossierStam & "\contrats_annonces.txt"
+fichierJournal = dossierStam & "\site_contrats.log"
 
-Dim fichierConfig, adresse, code
-fichierConfig = sh.ExpandEnvironmentStrings("%APPDATA%") & "\STAM\site_contrats.ini"
+Dim adresse, code, derniere
 LireConfig
-
 If adresse = "" Or code = "" Then
+  If silencieux Then Journal "Pas encore configuré : lancer POUSSER_SITE_CONTRATS.vbs une fois à la main.": WScript.Quit
   adresse = InputBox("Adresse du site des contrats :", TITRE, "https://contrats.onrender.com")
   If adresse = "" Then WScript.Quit
   code = InputBox("Code secret du site (valeur de REFRESH_SECRET dans Render > Environment) :", TITRE)
@@ -34,53 +50,164 @@ If adresse = "" Or code = "" Then
   EcrireConfig
 End If
 
-Dim cheminValidation, cheminConducteurs
+Dim cheminValidation, cheminConducteurs, dateFichier
 cheminValidation = dossier & "\VALIDATION_CONTRATS.xlsx"
 cheminConducteurs = dossier & "\CONDUCTEURS.xlsx"
 If Not fso.FileExists(cheminValidation) Then
-  MsgBox "Fichier introuvable :" & vbCrLf & cheminValidation & vbCrLf & vbCrLf & _
-    "Le site n'a pas été mis à jour.", vbExclamation, TITRE
-  WScript.Quit 1
+  Erreur "Fichier introuvable : " & cheminValidation
 End If
+dateFichier = CStr(fso.GetFile(cheminValidation).DateLastModified)
+' en automatique : rien à faire si le fichier n'a pas changé depuis le dernier envoi
+If silencieux And dateFichier = derniere Then WScript.Quit
 
+' --- contrats déjà annoncés aux conducteurs --------------------------------
+Dim premier, connus
+premier = Not fso.FileExists(fichierConnus)
+connus = ""
+If Not premier Then connus = LireTexte(fichierConnus)
+
+' --- envoi au site ----------------------------------------------------------
 Dim corps
-corps = "{""validation"":""" & LireBase64(cheminValidation) & """"
+corps = "{""mails"":true,""validation"":""" & LireBase64(cheminValidation) & """"
 If fso.FileExists(cheminConducteurs) Then corps = corps & ",""conducteurs"":""" & LireBase64(cheminConducteurs) & """"
+If Not premier Then corps = corps & ",""connus"":""" & JsonTexte(Replace(connus, vbCrLf, "|")) & """"
 corps = corps & "}"
 
-' Le site gratuit peut mettre jusqu'à une minute à se réveiller : 2 essais.
+' le site gratuit peut mettre jusqu'à une minute à se réveiller : 3 essais
 Dim statut, reponse, essai
-For essai = 1 To 2
+For essai = 1 To 3
   Envoyer corps, statut, reponse
   If statut = 200 Or statut = 400 Or statut = 401 Then Exit For
-  WScript.Sleep 5000
+  WScript.Sleep 10000
 Next
 
-Dim message
-message = ExtraireMessage(reponse)
-If statut = 200 Then
-  If Not silencieux Or InStr(reponse, """sauvegarde"":false") > 0 Then
-    MsgBox "Site des contrats mis à jour." & vbCrLf & vbCrLf & message, vbInformation, TITRE
+' --- lecture de la réponse ------------------------------------------------
+Dim lignes, ligne, champs, message, nouveauxConnus, mails(), nbMails
+message = "": nouveauxConnus = "": nbMails = 0
+ReDim mails(0)
+lignes = Split(Replace(reponse, vbCr, ""), vbLf)
+For Each ligne In lignes
+  champs = Split(ligne, vbTab)
+  If UBound(champs) >= 1 Then
+    Select Case champs(0)
+      Case "MESSAGE": message = DecodeB64(champs(1))
+      Case "CONNUS": nouveauxConnus = DecodeB64(champs(1))
+      Case "MAIL"
+        If UBound(champs) >= 4 Then
+          ReDim Preserve mails(nbMails)
+          mails(nbMails) = Array(DecodeB64(champs(1)), DecodeB64(champs(2)), DecodeB64(champs(3)), DecodeB64(champs(4)))
+          nbMails = nbMails + 1
+        End If
+    End Select
   End If
-ElseIf statut = 401 Then
-  ' code faux : on l'oublie pour le redemander au prochain lancement
-  code = "": EcrireConfig
-  MsgBox "Le code secret est incorrect : le site n'a pas été mis à jour." & vbCrLf & vbCrLf & _
-    "Relancez POUSSER_SITE_CONTRATS.vbs et saisissez la valeur de REFRESH_SECRET (Render > Environment).", vbExclamation, TITRE
-  WScript.Quit 1
-Else
-  MsgBox "Le site n'a pas pu être mis à jour (code " & statut & ")." & vbCrLf & vbCrLf & message & vbCrLf & vbCrLf & _
-    "Vérifiez la connexion internet puis relancez POUSSER_SITE_CONTRATS.vbs.", vbExclamation, TITRE
-  WScript.Quit 1
+Next
+If message = "" Then message = Left(reponse, 300)
+
+If statut = 401 Then
+  If Not silencieux Then code = "": EcrireConfig
+  Erreur "Le code secret est incorrect : le site n'a pas été mis à jour." & vbCrLf & _
+    "Relancez POUSSER_SITE_CONTRATS.vbs à la main et saisissez la valeur de REFRESH_SECRET (Render > Environment)."
+ElseIf statut <> 200 Then
+  Erreur "Le site n'a pas pu être mis à jour (code " & statut & ")." & vbCrLf & message
+End If
+Journal "Site mis à jour : " & message
+
+' --- mails aux conducteurs ------------------------------------------------
+Dim envoyes, brouillons, echecs, i, rapportMails
+envoyes = 0: brouillons = 0: echecs = ""
+If nbMails > 0 Then
+  Dim faireEnvoi
+  faireEnvoi = True
+  If premier Then
+    ' tout premier envoi : un mail de lancement par conducteur, avec son lien
+    If silencieux Then
+      faireEnvoi = False
+    Else
+      faireEnvoi = (MsgBox("Le site est à jour." & vbCrLf & vbCrLf & _
+        "Envoyer maintenant à chaque conducteur (" & nbMails & ") un mail avec son lien personnel vers le site ?" & vbCrLf & vbCrLf & _
+        "Ensuite, chaque nouveau contrat signé leur sera envoyé automatiquement.", vbYesNo + vbQuestion, TITRE) = vbYes)
+    End If
+  End If
+  If faireEnvoi Then
+    Dim ol
+    Set ol = Nothing
+    On Error Resume Next
+    Set ol = CreateObject("Outlook.Application")
+    On Error GoTo 0
+    If ol Is Nothing Then
+      echecs = "Outlook n'a pas pu être ouvert : aucun mail envoyé."
+    Else
+      For i = 0 To nbMails - 1
+        EnvoyerMail ol, mails(i)(0), mails(i)(1), mails(i)(2), mails(i)(3)
+      Next
+    End If
+  End If
 End If
 
-' ----------------------------------------------------------------------------
+' on retient les contrats annoncés seulement si les mails sont partis (ou
+' volontairement pas envoyés au premier lancement)
+If nouveauxConnus <> "" And echecs = "" Then EcrireTexte fichierConnus, Replace(nouveauxConnus, vbLf, vbCrLf)
+' en cas d'échec Outlook, on réessaiera au prochain passage
+If echecs = "" Then derniere = dateFichier: EcrireConfig
+
+rapportMails = ""
+If envoyes > 0 Then rapportMails = rapportMails & vbCrLf & envoyes & " mail(s) envoyé(s) aux conducteurs."
+If brouillons > 0 Then rapportMails = rapportMails & vbCrLf & brouillons & " mail(s) n'ont pas pu partir : ils sont dans vos Brouillons Outlook."
+If echecs <> "" Then rapportMails = rapportMails & vbCrLf & echecs
+If rapportMails <> "" Then Journal Replace(rapportMails, vbCrLf, " ")
+
+If Not silencieux Then
+  MsgBox "Site des contrats mis à jour." & vbCrLf & vbCrLf & message & vbCrLf & rapportMails, vbInformation, TITRE
+ElseIf brouillons > 0 Or echecs <> "" Or InStr(message, "ATTENTION") > 0 Then
+  MsgBox message & vbCrLf & rapportMails, vbExclamation, TITRE
+End If
+
+' ============================================================================
+Sub EnvoyerMail(ol, a, objet, html, pjs)
+  Dim m, nom, chemin, compte, c
+  Set m = ol.CreateItem(0)
+  m.To = a
+  m.Subject = objet
+  m.HTMLBody = html
+  ' expéditeur rh@stam05.fr si cette boîte est dans Outlook
+  Set compte = Nothing
+  On Error Resume Next
+  For Each c In ol.Session.Accounts
+    If LCase(c.SmtpAddress) = EXPEDITEUR Then Set compte = c
+  Next
+  If Not compte Is Nothing Then
+    Set m.SendUsingAccount = compte
+  Else
+    m.SentOnBehalfOfName = EXPEDITEUR
+  End If
+  Err.Clear
+  On Error GoTo 0
+  For Each nom In Split(pjs, "|")
+    If nom <> "" Then
+      chemin = dossier & "\TRAITE\" & nom
+      If fso.FileExists(chemin) Then m.Attachments.Add chemin
+    End If
+  Next
+  On Error Resume Next
+  m.Send
+  If Err.Number <> 0 Then
+    Err.Clear
+    m.Save
+    brouillons = brouillons + 1
+    Journal "Mail non parti (gardé en brouillon) : " & a & " - " & objet
+  Else
+    envoyes = envoyes + 1
+    Journal "Mail envoyé : " & a & " - " & objet
+  End If
+  On Error GoTo 0
+End Sub
+
 Sub Envoyer(texte, ByRef st, ByRef rep)
   Dim http
   On Error Resume Next
   Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
   http.setTimeouts 30000, 90000, 180000, 180000
-  http.open "POST", adresse & "/api/import-excel", False
+  http.open "POST", adresse & "/api/import-excel?format=vbs", False
   http.setRequestHeader "Content-Type", "application/json"
   http.setRequestHeader "x-refresh-token", code
   http.send texte
@@ -91,6 +218,12 @@ Sub Envoyer(texte, ByRef st, ByRef rep)
     st = http.status: rep = http.responseText
   End If
   On Error GoTo 0
+End Sub
+
+Sub Erreur(texte)
+  Journal "ERREUR : " & Replace(texte, vbCrLf, " ")
+  If Not silencieux Then MsgBox texte, vbExclamation, TITRE
+  WScript.Quit 1
 End Sub
 
 Function LireBase64(chemin)
@@ -109,37 +242,67 @@ Function LireBase64(chemin)
   LireBase64 = Replace(Replace(el.Text, vbLf, ""), vbCr, "")
 End Function
 
-Function ExtraireMessage(json)
-  Dim re, m
-  Set re = New RegExp
-  re.Pattern = """message"":""([^""]*)"""
-  Set m = re.Execute(json)
-  If m.Count > 0 Then
-    ExtraireMessage = m(0).SubMatches(0)
-  Else
-    ExtraireMessage = Left(json, 300)
-  End If
+Function DecodeB64(b64)
+  ' base64 -> texte UTF-8 (garde les accents)
+  Dim xml, el, st
+  If b64 = "" Then DecodeB64 = "": Exit Function
+  Set xml = CreateObject("MSXML2.DOMDocument.6.0")
+  Set el = xml.createElement("b")
+  el.DataType = "bin.base64"
+  el.Text = b64
+  Set st = CreateObject("ADODB.Stream")
+  st.Type = 1: st.Open: st.Write el.NodeTypedValue
+  st.Position = 0: st.Type = 2: st.Charset = "utf-8"
+  DecodeB64 = st.ReadText
+  st.Close
 End Function
 
+Function JsonTexte(t)
+  JsonTexte = Replace(Replace(t, "\", "\\"), """", "\""")
+End Function
+
+Function LireTexte(chemin)
+  Dim f
+  Set f = fso.OpenTextFile(chemin, 1, False, -1)
+  If f.AtEndOfStream Then LireTexte = "" Else LireTexte = f.ReadAll
+  f.Close
+End Function
+
+Sub EcrireTexte(chemin, t)
+  Dim f
+  Set f = fso.CreateTextFile(chemin, True, True)
+  f.Write t
+  f.Close
+End Sub
+
+Sub Journal(t)
+  Dim f
+  On Error Resume Next
+  Set f = fso.OpenTextFile(fichierJournal, 8, True, -1)
+  f.WriteLine Now & "  " & t
+  f.Close
+  On Error GoTo 0
+End Sub
+
 Sub LireConfig()
-  Dim f, ligne
-  adresse = "": code = ""
+  Dim f, l
+  adresse = "": code = "": derniere = ""
   If Not fso.FileExists(fichierConfig) Then Exit Sub
   Set f = fso.OpenTextFile(fichierConfig, 1)
   Do Until f.AtEndOfStream
-    ligne = f.ReadLine
-    If Left(ligne, 8) = "adresse=" Then adresse = Trim(Mid(ligne, 9))
-    If Left(ligne, 5) = "code=" Then code = Trim(Mid(ligne, 6))
+    l = f.ReadLine
+    If Left(l, 8) = "adresse=" Then adresse = Trim(Mid(l, 9))
+    If Left(l, 5) = "code=" Then code = Trim(Mid(l, 6))
+    If Left(l, 9) = "derniere=" Then derniere = Trim(Mid(l, 10))
   Loop
   f.Close
 End Sub
 
 Sub EcrireConfig()
-  Dim d, f
-  d = fso.GetParentFolderName(fichierConfig)
-  If Not fso.FolderExists(d) Then fso.CreateFolder d
+  Dim f
   Set f = fso.CreateTextFile(fichierConfig, True)
   f.WriteLine "adresse=" & adresse
   f.WriteLine "code=" & code
+  f.WriteLine "derniere=" & derniere
   f.Close
 End Sub
