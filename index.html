@@ -62,13 +62,14 @@ header.top{
 h1{font-size:22px; font-weight:800; margin:6px 0 0; line-height:1.15}
 .subtitle{font-size:13.5px; color:var(--fg-muted); margin-top:3px}
 .subtitle strong{color:var(--fg)}
-.tabs{display:flex; gap:6px; margin-top:12px}
+.tabs{display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin-top:12px}
 .tab{
-  flex:1; min-width:0; padding:10px 4px; border-radius:9px; border:1px solid var(--border);
-  background:var(--surface-2); color:var(--fg-muted); font-weight:600; font-size:13px; cursor:pointer;
+  min-width:0; padding:7px 2px 6px; border-radius:9px; border:1px solid var(--border);
+  background:var(--surface-2); color:var(--fg-muted); font-weight:600; font-size:12px; line-height:1.2; cursor:pointer;
+  display:flex; flex-direction:column; align-items:center; gap:1px; white-space:nowrap;
 }
 .tab[aria-selected="true"]{background:var(--fg); color:var(--bg); border-color:var(--fg)}
-.tab .n{font-family:"Archivo"; font-weight:700; margin-left:2px}
+.tab .n{font-family:"Archivo"; font-weight:700; font-size:16px}
 
 /* ---------- filtres ---------- */
 .filters{padding-top:12px}
@@ -216,9 +217,10 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     <h1 id="pageTitle">Contrats à valider</h1>
     <div class="subtitle" id="subtitle">Chargement…</div>
     <div class="tabs" id="tabs" role="tablist" hidden>
-      <button class="tab" id="tab-pending" role="tab" aria-selected="true" data-tab="pending">À valider <span class="n" id="n-pending"></span></button>
-      <button class="tab" id="tab-echeances" role="tab" aria-selected="false" data-tab="echeances">Fins proches <span class="n" id="n-echeances"></span></button>
-      <button class="tab" id="tab-history" role="tab" aria-selected="false" data-tab="history">Historique <span class="n" id="n-history"></span></button>
+      <button class="tab" id="tab-pending" role="tab" aria-selected="true" data-tab="pending"><span class="n" id="n-pending"></span>À valider</button>
+      <button class="tab" id="tab-encours" role="tab" aria-selected="false" data-tab="encours"><span class="n" id="n-encours"></span>En cours</button>
+      <button class="tab" id="tab-echeances" role="tab" aria-selected="false" data-tab="echeances"><span class="n" id="n-echeances"></span>Fins proches</button>
+      <button class="tab" id="tab-history" role="tab" aria-selected="false" data-tab="history"><span class="n" id="n-history"></span>Historique</button>
     </div>
   </header>
 
@@ -254,6 +256,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
       <div class="list" id="list-pending"></div>
     </main>
     <main id="view-echeances" hidden><div id="list-echeances"></div></main>
+    <main id="view-encours" hidden><div class="list" id="list-encours"></div></main>
     <main id="view-history" hidden><div class="list" id="list-history"></div></main>
     <div id="emptyBox" class="empty" hidden></div>
   </div>
@@ -331,10 +334,24 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     return it;
   }
 
+  function finEffective(it){ return it.nouvelleDateFin || it.finFerme; }
+  function today0(){ var d = new Date(); d.setHours(0, 0, 0, 0); return d; }
+  // Une fin proche reste à traiter (prolonger / arrêter) même si le contrat
+  // a été validé : seuls un refus, une prolongation ou un arrêt la retirent.
+  var FIN_TRAITEE = { refuse:1, prolonge:1, arrete:1 };
   function itemsOfTab(t){
     if (t === 'pending') return pending.filter(function(it){ return !isDecided(it); });
-    if (t === 'echeances') return echeances.filter(function(it){ return !isDecided(it); });
+    if (t === 'echeances') return echeances.filter(function(it){ return !FIN_TRAITEE[it.statut]; });
     var seen = {};
+    if (t === 'encours'){
+      var t0 = today0();
+      return pending.concat(echeances).filter(function(it){
+        if ((it.statut !== 'valide' && it.statut !== 'prolonge') || seen[it.contrat]) return false;
+        var fin = parseFR(finEffective(it));
+        if (fin && fin < t0) return false;
+        return (seen[it.contrat] = true);
+      }).sort(function(a, b){ return (parseFR(finEffective(a)) || 0) - (parseFR(finEffective(b)) || 0); });
+    }
     return pending.concat(echeances).filter(function(it){
       if (!isDecided(it) || seen[it.contrat]) return false;
       return (seen[it.contrat] = true);
@@ -439,24 +456,28 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     var fn = undoFn; undoFn = null; $('toast').hidden = true;
     if (fn) fn();
   });
-  function undoable(contrats){
-    var prev = contrats.map(function(c){ var it = byContrat[c][0]; return { c: c, statut: it.statut, commentaire: it.commentaire, valideLe: it.valideLe, nouvelleDateFin: it.nouvelleDateFin }; });
+  // Annuler = revenir à l'état d'avant : "validé" si le contrat l'était
+  // (ex. prolongation d'un contrat validé), sinon "à traiter".
+  function undoable(contrats, avant){
+    var retour = avant === 'valide' ? 'ok' : 'attente';
     return function(){
-      sendDecision(contrats, 'attente').then(function(){
-        prev.forEach(function(p){ (byContrat[p.c] || []).forEach(function(it){ it.statut = 'attente'; it.commentaire = null; it.valideLe = null; delete it.nouvelleDateFin; }); });
+      sendDecision(contrats, retour).then(function(){
+        applyLocal(contrats, retour);
         render();
-        toast(contrats.length > 1 ? 'Annulé : les ' + contrats.length + ' contrats sont de nouveau à traiter.' : 'Annulé : le contrat est de nouveau à traiter.');
+        toast(retour === 'ok' ? 'Annulé : le contrat redevient « Validé ».'
+          : (contrats.length > 1 ? 'Annulé : les ' + contrats.length + ' contrats sont de nouveau à traiter.' : 'Annulé : le contrat est de nouveau à traiter.'));
       }).catch(function(e){ toast(errorText(e), null, true); });
     };
   }
 
   // retire la carte en douceur puis redessine
   function decideAndAnimate(card, contrats, decision, extra, msg){
+    var avant = (byContrat[contrats[0]] || [{}])[0].statut;
     var btns = card ? card.querySelectorAll('button') : [];
     Array.prototype.forEach.call(btns, function(b){ b.disabled = true; });
     return sendDecision(contrats, decision, extra).then(function(){
       applyLocal(contrats, decision, extra);
-      toast(msg, decision === 'attente' ? null : undoable(contrats));
+      toast(msg, decision === 'attente' ? null : undoable(contrats, avant));
       if (card){ card.classList.add('leaving'); setTimeout(render, 230); } else render();
     }).catch(function(e){
       Array.prototype.forEach.call(btns, function(b){ b.disabled = false; });
@@ -535,6 +556,26 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     '</article>';
   }
 
+  function enCoursCard(it){
+    var fin = parseFR(finEffective(it));
+    var j = fin ? Math.round((fin - today0()) / 86400000) : null;
+    var reste = j == null ? '' : (j === 0 ? 'Se termine aujourd’hui' : 'Encore ' + plural(j, 'jour', 'jours'));
+    var badge = it.statut === 'prolonge'
+      ? '<span class="chip ok">Prolongation demandée</span>'
+      : '<span class="chip ok">✓ Validé</span>';
+    return '<article class="card" data-contrat="' + esc(it.contrat) + '">' +
+      head(it, badge) + metaRow(it, true) +
+      '<div class="facts">' +
+        '<div class="fact"><div class="lbl">' + (it.nouvelleDateFin ? 'Nouvelle fin' : 'Fin de contrat') + '</div><div class="val big tabular">' + esc(finEffective(it) || '—') + '</div>' +
+          '<div class="sub' + (j != null && j <= 7 ? '" style="color:var(--warn); font-weight:600' : '') + '">' + esc(reste) + '</div></div>' +
+        '<div class="fact"><div class="lbl">Début</div><div class="val big tabular">' + esc(it.debutMission || '—') + '</div>' +
+          '<div class="sub">' + (it.heuresSemaine != null ? esc(it.heuresSemaine) + ' h / semaine' : '') + '</div></div>' +
+      '</div>' +
+      (it.commentaire ? '<div class="hist-note quote">“' + esc(it.commentaire) + '”</div>' : '') +
+      '<div class="hist-foot"><span>' + (it.statut === 'prolonge' ? 'Demandée' : 'Validé') + ' le ' + esc(it.valideLe || '—') + '</span><button class="linkbtn" data-act="reset">Annuler</button></div>' +
+    '</article>';
+  }
+
   function historyCard(it){
     return '<article class="card" data-contrat="' + esc(it.contrat) + '">' +
       head(it, '<span class="chip ' + (STATUT_CLS[it.statut] || '') + '">' + esc(STATUT_LABEL[it.statut] || it.statut) + '</span>') +
@@ -566,7 +607,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     }
     function comment(){ var p = btn.closest('.panel'); var t = p && p.querySelector('textarea'); return t ? t.value.trim() : ''; }
 
-    if (act === 'ok') decideAndAnimate(card, [contrat], 'ok', null, 'Contrat validé.').catch(function(){});
+    if (act === 'ok') decideAndAnimate(card, [contrat], 'ok', null, 'Validé — à retrouver dans « En cours ».').catch(function(){});
     else if (act === 'refuse' || act === 'prolonger' || act === 'arreter'){
       if (btn.getAttribute('aria-pressed') === 'true') closePanels(); else openPanel(act);
     }
@@ -585,7 +626,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
       decideAndAnimate(card, [contrat], 'attente', null, 'Décision annulée : le contrat est de nouveau à traiter.').catch(function(){});
     }
   }
-  ['list-pending', 'list-echeances', 'list-history'].forEach(function(id){ $(id).addEventListener('click', onCardClick); });
+  ['list-pending', 'list-encours', 'list-echeances', 'list-history'].forEach(function(id){ $(id).addEventListener('click', onCardClick); });
 
   /* ---------- tout valider ---------- */
   var visiblePending = [];
@@ -610,7 +651,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     sendDecision(contrats, 'ok').then(function(){
       applyLocal(contrats, 'ok');
       $('bulkStart').hidden = false; $('bulkConfirm').hidden = true;
-      toast(plural(contrats.length, 'contrat validé', 'contrats validés') + '.', undoable(contrats));
+      toast(plural(contrats.length, 'contrat validé', 'contrats validés') + ' — à retrouver dans « En cours ».', undoable(contrats, 'attente'));
       render();
     }).catch(function(e){
       $('bulkErr').textContent = errorText(e); $('bulkErr').hidden = false;
@@ -628,6 +669,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     $('n-pending').textContent = nPending;
     $('n-echeances').textContent = itemsOfTab('echeances').length;
     $('n-history').textContent = itemsOfTab('history').length;
+    $('n-encours').textContent = itemsOfTab('encours').length;
     $('subtitle').innerHTML = nPending
       ? '<strong>' + plural(nPending, 'contrat', 'contrats') + '</strong> à valider'
       : 'Tout est à jour, merci !';
@@ -637,7 +679,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
       : plural(all.length, 'contrat', 'contrats');
     $('clearFilters').hidden = !hasFilters();
 
-    ['pending', 'echeances', 'history'].forEach(function(t){
+    ['pending', 'encours', 'echeances', 'history'].forEach(function(t){
       $('view-' + t).hidden = t !== tab;
       $('tab-' + t).setAttribute('aria-selected', String(t === tab));
     });
@@ -659,6 +701,8 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
         return '<div class="site-group"><h2>' + PIN + esc(g) + ' <span class="count">(' + groups[g].length + ')</span></h2>' +
           '<div class="list">' + groups[g].map(echeanceCard).join('') + '</div></div>';
       }).join('');
+    } else if (tab === 'encours'){
+      $('list-encours').innerHTML = shown.map(enCoursCard).join('');
     } else {
       $('list-history').innerHTML = shown.map(historyCard).join('');
     }
@@ -674,6 +718,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
         empty.innerHTML = {
           pending: '<div class="big">Rien à valider 🎉</div><p>Tous les contrats de vos chantiers sont validés ou refusés.</p>',
           echeances: '<div class="big">Aucune fin de contrat proche</div><p>Aucun contrat de vos chantiers n’arrive à échéance dans les prochaines semaines.</p>',
+          encours: '<div class="big">Aucun contrat en cours</div><p>Les contrats que vous validez apparaissent ici jusqu’à leur date de fin.</p>',
           history: '<div class="big">Pas encore de décision</div><p>Chaque contrat validé, refusé, prolongé ou arrêté apparaîtra ici, avec la date et le commentaire.</p>'
         }[tab];
       }

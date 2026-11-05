@@ -153,7 +153,11 @@ lien a circulé), modifie sa ligne dans `liens.json`.
 - **Tout valider** : valide d'un coup tous les contrats affichés (par
   exemple tout un chantier après avoir choisi le filtre), avec une
   confirmation avant.
-- **Fins proches** : prolonger (avec la nouvelle date) ou arrêter.
+- **En cours** : les contrats validés (ou prolongés) dont la mission n'est
+  pas terminée, triés par date de fin, avec le nombre de jours restants.
+  Un contrat validé quitte « À valider » et apparaît ici.
+- **Fins proches** : prolonger (avec la nouvelle date) ou arrêter, même
+  pour un contrat déjà validé.
 - **Historique** : chaque décision peut être annulée (« Annuler cette
   décision »).
 
