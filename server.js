@@ -4,8 +4,8 @@
 // fichiers a la racine du depot, pas de sous-dossiers) pour que le depot
 // GitHub reste facile a mettre a jour a la main depuis l'interface web :
 //  - GET /            page d'accueil (invite a utiliser son lien personnel).
-//  - GET /c/<slug>   page personnelle d'un conducteur. Ses donnees viennent
-//    de GET /api/moi/<slug> (uniquement ses contrats).
+//  - GET /c/<code>   page personnelle d'un conducteur (code = initiales +
+//    4 chiffres, voir liens.json). Ses donnees : GET /api/moi/<code>.
 //  - GET /dashboard (+ /api/dashboard.json) : page PRIVEE RH, avec montants,
 //    protegee par une authentification HTTP Basic (identifiant/mot de passe
 //    definis uniquement via des variables d'environnement Render, jamais
@@ -361,19 +361,54 @@ function requireRhAuth(req, res, next) {
 }
 
 // ---------------------------------------------------------------------
-// Lien personnel de chaque conducteur : /c/<slug>. La page ne recoit que
-// les contrats de CE conducteur (GET /api/moi/<slug>), et il ne peut
-// decider que sur ses propres contrats. Les donnees de tout le monde
-// (/api/data.json) restent reservees a RH.
+// Lien personnel de chaque conducteur : /c/<code>, ou <code> = initiales
+// + 4 chiffres (ex. /c/fr6825), defini dans liens.json. Un conducteur
+// absent de liens.json recoit un code automatique, stable, du meme format.
+// La page ne recoit que les contrats de CE conducteur (GET /api/moi/<code>),
+// et il ne peut decider que sur ses propres contrats. Les donnees de tout
+// le monde (/api/data.json) restent reservees a RH.
 // ---------------------------------------------------------------------
-function linkPath(slug) {
-  return '/c/' + encodeURIComponent(slug);
+const LIENS_FIXES = readJsonSafe(path.join(__dirname, 'liens.json'), {});
+
+function initiales(slug) {
+  return String(slug).split('-').filter(Boolean).map((w) => w[0]).join('');
 }
 
-function knownSlug(slug) {
-  if (!slug) return null;
-  slug = String(slug);
-  return (served.data.conducteurs[slug] || served.data.echeances[slug]) ? slug : null;
+function codeOf(slug) {
+  const fixe = LIENS_FIXES[slug];
+  if (fixe && !slug.startsWith('_')) return String(fixe).toLowerCase();
+  const h = crypto.createHmac('sha256', process.env.REFRESH_SECRET || 'stam-contrats').update('lien:' + slug).digest();
+  return initiales(slug) + String(1000 + (h.readUInt32BE(0) % 9000));
+}
+
+function linkPath(slug) {
+  return '/c/' + codeOf(slug);
+}
+
+function slugFromCode(code) {
+  if (!code) return null;
+  code = String(code).toLowerCase();
+  const slugs = new Set(Object.keys(served.data.conducteurs || {}).concat(Object.keys(served.data.echeances || {})));
+  slugs.delete('rh'); // "rh" = contrats non attribues, pas un conducteur
+  for (const slug of slugs) if (codeOf(slug) === code) return slug;
+  return null;
+}
+
+// Anti-essais : au-dela de 20 liens invalides en 15 min depuis une meme
+// adresse, on bloque cette adresse 15 min (empeche de tester les 9000
+// combinaisons a la chaine).
+app.set('trust proxy', 1);
+const essaisRates = new Map();
+function tropDEssais(req) {
+  const e = essaisRates.get(req.ip);
+  return !!(e && e.fin > Date.now() && e.n >= 20);
+}
+function noterEssaiRate(req) {
+  const now = Date.now();
+  let e = essaisRates.get(req.ip);
+  if (!e || e.fin < now) { e = { n: 0, fin: now + 15 * 60 * 1000 }; essaisRates.set(req.ip, e); }
+  e.n++;
+  if (essaisRates.size > 5000) for (const [k, v] of essaisRates) if (v.fin < now) essaisRates.delete(k);
 }
 
 function contratsOfSlug(slug) {
@@ -398,7 +433,7 @@ app.get('/', (req, res) => {
 // script cote client lit le slug dans l'URL et affiche directement le bon
 // conducteur, sans exposer les noms des autres. La liste de ces liens est
 // disponible dans le tableau de bord RH (authentifie).
-app.get(['/c/:slug', '/c/:slug/:ancienCode'], (req, res) => {
+app.get('/c/:code', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
@@ -413,9 +448,10 @@ app.get('/dashboard', requireRhAuth, (req, res) => {
 app.get('/api/data.json', requireRhAuth, (req, res) => res.json(served.data));
 
 // Donnees d'UN conducteur (sa page personnelle).
-app.get('/api/moi/:slug', (req, res) => {
-  const slug = knownSlug(req.params.slug);
-  if (!slug) return res.status(404).json({ error: 'lien invalide' });
+app.get('/api/moi/:code', (req, res) => {
+  if (tropDEssais(req)) return res.status(429).json({ error: 'trop d\'essais, reessayez dans 15 minutes' });
+  const slug = slugFromCode(req.params.code);
+  if (!slug) { noterEssaiRate(req); return res.status(404).json({ error: 'lien invalide' }); }
   const c = served.data.conducteurs[slug] || { nom: '', items: [] };
   const e = served.data.echeances[slug] || { chantiers: [] };
   res.set('Cache-Control', 'no-store');
@@ -524,10 +560,10 @@ async function sendBulkDecisionEmail(contrats, decisionInfo) {
 // decide. Un seul contrat ({ contrat }) ou plusieurs d'un coup
 // ({ contrats: [...] }, bouton "Tout valider"). Autorise pour RH
 // (identifiant/mot de passe du tableau de bord) ou depuis la page d'un
-// conducteur ({ slug }), et dans ce cas seulement sur ses contrats.
+// conducteur ({ lien: <code> }), et dans ce cas seulement sur ses contrats.
 // ---------------------------------------------------------------------
 app.post('/api/decision', async (req, res) => {
-  const { contrat, contrats, decision, commentaire, nouvelleDateFin, slug } = req.body || {};
+  const { contrat, contrats, decision, commentaire, nouvelleDateFin, lien } = req.body || {};
   const liste = Array.isArray(contrats) ? contrats.map(String) : (contrat ? [String(contrat)] : []);
   if (!liste.length || liste.length > 500 || !decision || !DECISION_LABELS[decision]) {
     return res.status(400).json({ error: 'corps attendu : { contrat | contrats[], decision, commentaire?, nouvelleDateFin? }' });
@@ -536,8 +572,9 @@ app.post('/api/decision', async (req, res) => {
     return res.status(400).json({ error: 'nouvelleDateFin attendue au format JJ/MM/AAAA' });
   }
   if (!isRhRequest(req)) {
-    const moi = knownSlug(slug);
-    if (!moi) return res.status(401).json({ error: 'lien invalide' });
+    if (tropDEssais(req)) return res.status(429).json({ error: 'trop d\'essais' });
+    const moi = slugFromCode(lien);
+    if (!moi) { noterEssaiRate(req); return res.status(401).json({ error: 'lien invalide' }); }
     const autorises = contratsOfSlug(moi);
     const interdits = liste.filter((c) => !autorises.has(c));
     if (interdits.length) {

@@ -125,15 +125,22 @@ réveil — comme avant cette étape.
 
 ## Étape 7 — Lien personnel de chaque conducteur
 
-Chaque conducteur a son propre lien, du type
-`https://contrats.onrender.com/c/jean-dupont` : il atterrit directement
+Chaque conducteur a son propre lien : ses initiales + 4 chiffres, par
+exemple `https://contrats.onrender.com/c/fr6825`. Il atterrit directement
 sur SES contrats (à valider, fins proches, historique), sans voir ceux des
 autres, et ne peut valider ou refuser que ses propres contrats. La liste
-complète de tous les contrats reste réservée au tableau de bord RH.
+complète de tous les contrats reste réservée au tableau de bord RH. Après
+20 liens invalides en 15 minutes, une même connexion est bloquée 15
+minutes (pour empêcher de tester les numéros un par un).
 
 Pour récupérer ces liens : ouvre `/dashboard` → onglet **"Liens
 conducteurs"** → bouton **Copier** sur chaque ligne. À toi de les
 transmettre (SMS, en main propre, etc.).
+
+Les codes sont dans le fichier `liens.json`. Un nouveau conducteur qui
+n'y figure pas reçoit automatiquement un code du même format, visible dans
+le tableau de bord. Pour changer le code de quelqu'un (par exemple si son
+lien a circulé), modifie sa ligne dans `liens.json`.
 
 ### Ce que voit le conducteur
 

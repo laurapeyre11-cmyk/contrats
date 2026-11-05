@@ -314,7 +314,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
   var STATUT_CLS = { valide:'ok', refuse:'bad', prolonge:'ok', arrete:'bad' };
 
   /* ---------- etat ---------- */
-  var SLUG = null;
+  var LIEN = null;
   var pending = [], echeances = [];   // objets contrat
   var byContrat = {};                 // contrat -> [objets] (un contrat peut être dans les deux listes)
   var tab = 'pending';
@@ -399,7 +399,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     return fetch('/api/decision', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(Object.assign({ contrats: contrats, decision: decision, slug: SLUG }, extra || {}))
+      body: JSON.stringify(Object.assign({ contrats: contrats, decision: decision, lien: LIEN }, extra || {}))
     }).then(function(r){
       if (r.status === 401 || r.status === 403) throw new Error('acces');
       if (!r.ok) throw new Error('http');
@@ -693,15 +693,15 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     $('message').innerHTML = '<div class="empty"><div class="big">' + esc(title) + '</div><p>' + esc(text) + '</p></div>';
   }
 
-  var m = location.pathname.match(/^\/c\/([^/]+)(?:\/([^/]+))?\/?$/);
+  var m = location.pathname.match(/^\/c\/([^/]+)\/?$/);
   if (!m){
     showMessage('Lien personnel requis', "Cette page affiche les contrats d'un conducteur via son lien personnel. Si vous n'avez pas reçu le vôtre, contactez le service RH.");
     return;
   }
-  SLUG = decodeURIComponent(m[1]);
+  LIEN = decodeURIComponent(m[1]);
 
-  fetch('/api/moi/' + encodeURIComponent(SLUG), { cache: 'no-store' }).then(function(r){
-    if (r.status === 404) throw new Error('lien');
+  fetch('/api/moi/' + encodeURIComponent(LIEN), { cache: 'no-store' }).then(function(r){
+    if (r.status === 404 || r.status === 429) throw new Error('lien');
     if (!r.ok) throw new Error('http');
     return r.json();
   }).then(function(data){
@@ -713,7 +713,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     $('tabs').hidden = false; $('app').hidden = false;
     render();
   }).catch(function(e){
-    if (e.message === 'lien') showMessage('Lien invalide ou expiré', "Ce lien ne correspond à aucun conducteur. Demandez votre lien à jour au service RH.");
+    if (e.message === 'lien') showMessage('Lien invalide', "Ce lien ne correspond à aucun conducteur. Vérifiez qu'il est complet, ou demandez votre lien au service RH.");
     else showMessage('Données indisponibles', 'Impossible de charger les contrats pour le moment. Réessayez dans une minute (le site peut mettre 30 secondes à se réveiller).');
   });
 })();
