@@ -36,6 +36,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { construireDepuisExcel } = require('./import_excel');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -648,6 +649,11 @@ app.post('/api/refresh', async (req, res) => {
   if (!data || !dashboard) {
     return res.status(400).json({ error: 'corps attendu : { data, dashboard }' });
   }
+  const resume = await remplacerDonnees(data, dashboard);
+  res.json({ ok: true, genereLe: served.data.genereLe, upstash: resume });
+});
+
+async function remplacerDonnees(data, dashboard) {
   rawData = data;
   rawDashboard = dashboard;
   writeJsonSafe(DATA_FILE, rawData);
@@ -662,8 +668,53 @@ app.post('/api/refresh', async (req, res) => {
     kvSet(KV_KEYS.dashboard, rawDashboard),
   ]);
   rebuildServed();
-  const resume = resumeKvResultats({ data: rData, dashboard: rDashboard });
-  res.json({ ok: true, genereLe: served.data.genereLe, upstash: resume });
+  return resumeKvResultats({ data: rData, dashboard: rDashboard });
+}
+
+// ---------------------------------------------------------------------
+// Import direct de VALIDATION_CONTRATS.xlsx (05/11/2026) : le fichier
+// LANCER_MOTEUR_V6_ET_SITE.vbs lance STAM_MOTEUR_V6 puis envoie ici le
+// fichier Excel tel quel (et CONDUCTEURS.xlsx pour les adresses mail).
+// Le site se met donc a jour a chaque signature, sans autre etape.
+// Corps : { validation: <xlsx en base64>, conducteurs?: <xlsx en base64> }
+// Meme jeton que /api/refresh (en-tete x-refresh-token).
+// ---------------------------------------------------------------------
+app.post('/api/import-excel', async (req, res) => {
+  const token = req.headers['x-refresh-token'];
+  if (!process.env.REFRESH_SECRET) {
+    return res.status(503).json({ ok: false, message: 'REFRESH_SECRET non configure sur Render.' });
+  }
+  if (!token || !timingSafeEqual(token, process.env.REFRESH_SECRET)) {
+    return res.status(401).json({ ok: false, message: 'Code secret incorrect.' });
+  }
+  const { validation, conducteurs } = req.body || {};
+  if (!validation) return res.status(400).json({ ok: false, message: 'Fichier VALIDATION_CONTRATS.xlsx manquant.' });
+  let resultat;
+  try {
+    resultat = await construireDepuisExcel(
+      Buffer.from(String(validation), 'base64'),
+      conducteurs ? Buffer.from(String(conducteurs), 'base64') : null,
+      { corrections: LIENS_FIXES._corrections || {} }
+    );
+  } catch (e) {
+    console.error('Import Excel impossible :', e);
+    return res.status(400).json({ ok: false, message: 'Fichier Excel illisible : ' + (e && e.message ? e.message : e) });
+  }
+  if (!resultat.nombre) {
+    return res.status(400).json({ ok: false, message: 'Aucun contrat trouvé dans l\'onglet « A valider » : site non modifié.' });
+  }
+  const resume = await remplacerDonnees(resultat.data, resultat.dashboard);
+  const nbAttente = Object.values(served.data.conducteurs).reduce((n, c) => n + c.items.filter((it) => !it.statut || it.statut === 'attente').length, 0);
+  res.json({
+    ok: true,
+    genereLe: served.data.genereLe,
+    contrats: resultat.nombre,
+    enAttente: nbAttente,
+    sauvegarde: resume.ok,
+    message: resultat.nombre + ' contrats envoyés, dont ' + nbAttente + ' à valider.' +
+      (resume.ok ? '' : ' ATTENTION : la sauvegarde Upstash a échoué, les données seront perdues à la prochaine mise en veille du site.'),
+    upstash: resume,
+  });
 });
 
 // ---------------------------------------------------------------------

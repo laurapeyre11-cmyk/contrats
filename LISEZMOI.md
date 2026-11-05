@@ -123,6 +123,35 @@ n'a pas de limite de temps ni de carte bancaire à fournir. Sans ces deux
 variables, le site continue de fonctionner, mais redevient vide à chaque
 réveil — comme avant cette étape.
 
+## Mise à jour automatique à chaque signature (moteur V6)
+
+Le site lit directement `VALIDATION_CONTRATS.xlsx`, le fichier que
+`STAM_MOTEUR_V6.vbs` remplit à chaque signature. Deux petits fichiers,
+rangés dans `#LAURA/Interim` à côté du moteur (copie dans le dossier
+`windows/` de ce dépôt) :
+
+- **`LANCER_MOTEUR_V6_ET_SITE.vbs`** : à lancer **à la place** de
+  `STAM_MOTEUR_V6.vbs`. Il lance le moteur, attend qu'il ait fini, puis met
+  le site à jour. Une fenêtre confirme : « 301 contrats envoyés, dont 120
+  à valider ».
+- **`POUSSER_SITE_CONTRATS.vbs`** : met seulement le site à jour (par
+  exemple après une correction à la main dans l'Excel).
+
+Au tout premier lancement, une fenêtre demande l'adresse du site et le code
+secret : c'est la valeur de `REFRESH_SECRET` (Render → service `contrats`
+→ Environment). Elle est gardée sur le PC, on ne la redemande plus.
+
+Ce que fait la mise à jour :
+- les contrats du fichier remplacent ceux du site (un contrat présent deux
+  fois : la dernière ligne gagne) ;
+- les validations faites sur le site sont **conservées** ;
+- une validation saisie dans la colonne S de l'Excel (« Validé » /
+  « Refusé ») est reprise si le conducteur n'a rien décidé sur le site ;
+- « Fins proches » = contrats qui finissent dans les 30 jours ;
+- les adresses mail des conducteurs viennent de `CONDUCTEURS.xlsx`.
+- Un conducteur écrit de deux façons (ex. « Aleaxandre » / « Alexandre
+  QUEYRAS ») est réuni grâce à la rubrique `_corrections` de `liens.json`.
+
 ## Étape 7 — Lien personnel de chaque conducteur
 
 Chaque conducteur a son propre lien : ses initiales + 4 chiffres, par
