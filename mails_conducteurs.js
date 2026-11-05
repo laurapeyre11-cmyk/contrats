@@ -6,7 +6,8 @@
 // signes en pieces jointes.
 //
 // Pour ne jamais envoyer deux fois le meme contrat, le PC garde la liste
-// des contrats deja annonces et la transmet a chaque envoi ("connus").
+// des contrats deja annonces ("conducteur/n°") et la transmet a chaque envoi
+// ("connus") ; un contrat reattribue est annonce a son nouveau conducteur.
 // Premier envoi (liste absente) : un seul mail de lancement par conducteur
 // avec son lien, sans le detail des centaines de contrats deja en attente.
 
@@ -20,10 +21,10 @@ function prix(v) {
   return typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '—';
 }
 
+// "François RICHEPAIN" -> "François" ; nom tout en majuscules -> "" (« Bonjour, »)
 function prenom(nom) {
   const mots = String(nom || '').trim().split(/\s+/);
-  const p = mots.find((m) => m && m !== m.toUpperCase());
-  return p || mots[0] || '';
+  return mots.find((m) => m && m !== m.toUpperCase()) || '';
 }
 
 function aujourdhuiFR(d) {
@@ -43,7 +44,8 @@ function bouton(lien, texte) {
 }
 
 function corps(html) {
-  return '<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#000000">' + html + '<p>Cordialement,</p></div>';
+  return '<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#000000">' + html +
+    '<p>Cordialement,<br>Le service RH — STAM<br><a href="mailto:rh@stam05.fr">rh@stam05.fr</a></p></div>';
 }
 
 function tableau(items) {
@@ -71,20 +73,27 @@ function tableau(items) {
 // mails : { slug: adresse }   fichiers : { contrat: nom du PDF signe }
 // connus : Set des contrats deja annonces, ou null au tout premier envoi
 // lienDe(slug) : URL complete du lien personnel
+function cle(slug, contrat) {
+  return slug + '/' + contrat;
+}
+
 function preparerMails({ data, mails, fichiers, connus, lienDe, maintenant }) {
   const date = aujourdhuiFR(maintenant || new Date());
   const resultat = [];
   const tous = [];
   Object.keys(data.conducteurs || {}).forEach((slug) => {
     const c = data.conducteurs[slug];
-    (c.items || []).forEach((it) => tous.push(String(it.contrat)));
     if (slug === 'rh') return; // contrats non attribues : pas de conducteur a prevenir
     const a = mails[slug];
+    // sans adresse, rien n'est note comme annonce : ses contrats partiront
+    // des que son adresse sera ajoutee dans CONDUCTEURS.xlsx
     if (!a) return;
+    (c.items || []).forEach((it) => tous.push(cle(slug, it.contrat)));
     const enAttente = (c.items || []).filter((it) => !it.statut || it.statut === 'attente');
     if (!enAttente.length) return;
     const lien = lienDe(slug);
-    const bonjour = '<p>Bonjour ' + esc(prenom(c.nom)) + ',</p>';
+    const p = prenom(c.nom);
+    const bonjour = '<p>Bonjour' + (p ? ' ' + esc(p) : '') + ',</p>';
 
     if (!connus) {
       resultat.push({
@@ -101,7 +110,8 @@ function preparerMails({ data, mails, fichiers, connus, lienDe, maintenant }) {
       return;
     }
 
-    const nouveaux = enAttente.filter((it) => !connus.has(String(it.contrat)));
+    // un contrat reattribue est nouveau pour son nouveau conducteur
+    const nouveaux = enAttente.filter((it) => !connus.has(cle(slug, it.contrat)) && !connus.has(String(it.contrat)));
     if (!nouveaux.length) return;
     const n = nouveaux.length;
     const pj = nouveaux.map((it) => fichiers[it.contrat]).filter(Boolean);

@@ -1,4 +1,5 @@
 <!doctype html>
+<html lang="fr">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
@@ -55,7 +56,7 @@ h1{font-size:21px; font-weight:800; margin:6px 0 2px; line-height:1.15}
 .ov-card{
   background:var(--surface); border:1px solid var(--border); border-radius:11px; padding:12px 13px; min-width:0;
 }
-.ov-card .name{font-weight:700; font-size:13.5px; margin-bottom:7px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.ov-card .name{font-weight:700; font-size:13.5px; margin-bottom:7px; min-width:0; overflow-wrap:anywhere}
 .ov-stats{display:flex; gap:10px}
 .ov-stats b{display:block; font-family:"Archivo"; font-size:16px; font-weight:700}
 .ov-stats span{font-size:9px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.03em}
@@ -81,7 +82,8 @@ h1{font-size:21px; font-weight:800; margin:6px 0 2px; line-height:1.15}
   background:var(--surface); color:var(--fg);
 }
 .filters input{flex:1; min-width:140px}
-.filters .reset{
+.filters select{max-width:100%; min-width:0; text-overflow:ellipsis}
+.filters .reset, .result-count .reset{
   font:600 12.5px "Public Sans"; padding:8px 11px; border-radius:8px; border:1px solid var(--border);
   background:var(--surface-2); color:var(--fg-muted); cursor:pointer;
 }
@@ -158,7 +160,7 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
     <div class="subtitle">Vue complète, avec montants — usage interne RH uniquement.</div>
     <div class="priv-note">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z"/></svg>
-      Page privée (montants, salaires) : ne pas partager le lien avec les conducteurs. Eux ont leur propre page, sans ces chiffres.
+      Page privée (tous les contrats, avec montants) : ne pas partager ce lien. Chaque conducteur a sa propre page, qui n'affiche que ses contrats.
     </div>
   </header>
 
@@ -195,7 +197,7 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
 
   <!-- Onglet Suivi : uniquement ce qui a ete decide, en ordre chronologique -->
   <main id="suiviView" hidden>
-    <p class="subtitle" style="margin-top:14px">Chaque ligne = une décision prise par un conducteur sur sa page personnelle (ou par toi en réattribution). Triée par date de décision, la plus récente en premier par défaut.</p>
+    <p class="subtitle" style="margin-top:14px">Chaque ligne = une décision prise par un conducteur sur sa page personnelle (ou par vous depuis ce tableau de bord). Triée par date de décision, la plus récente en premier par défaut.</p>
     <div class="filters">
       <select id="fConducteurSuivi"></select>
       <select id="fChantierSuivi"></select>
@@ -252,10 +254,12 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
   function num(v){ if (v === null || v === undefined) return '—'; return v.toFixed(2).replace('.', ',') + ' €/h'; }
   function euro0(v){ return Math.round(v).toLocaleString('fr-FR') + ' €'; }
 
+  // "rh" = contrat pas encore attribué à un conducteur
+  function nomConducteur(n){ return n === 'rh' ? 'Non attribué' : (n || '—'); }
   function fillSelect(sel, noms, allLabel){
     var prev = sel.value;
     sel.innerHTML = '<option value="tous">' + allLabel + '</option>' +
-      noms.map(function(n){ return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('');
+      noms.map(function(n){ return '<option value="' + esc(n) + '">' + esc(nomConducteur(n)) + '</option>'; }).join('');
     if (prev && noms.indexOf(prev) !== -1) sel.value = prev;
   }
 
@@ -276,7 +280,8 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
   function exportCsv(columns, rows, filename){
     var sep = ';';
     function cell(v){
-      var s = String(v == null ? '' : v).replace(/"/g, '""');
+      // nombres avec une virgule, pour Excel en français
+      var s = (typeof v === 'number' ? String(v).replace('.', ',') : String(v == null ? '' : v)).replace(/"/g, '""');
       return /[;"\n]/.test(s) ? '"' + s + '"' : s;
     }
     var lines = [columns.map(function(c){ return cell(c.label); }).join(sep)];
@@ -335,9 +340,12 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
 
   function assignCellHtml(it){
     var unassigned = it.conducteur === 'rh';
-    var options = CONDUCTEURS.map(function(c){
-      return '<option value="' + esc(c.nom) + '" data-mail="' + esc(c.mail||'') + '"' + (c.nom === it.conducteur ? ' selected' : '') + '>' + esc(c.nom) + '</option>';
-    }).join('');
+    var options = '<option value=""' + (unassigned ? ' selected' : '') + ' disabled>— Choisir —</option>' +
+      CONDUCTEURS.map(function(c){
+        return '<option value="' + esc(c.nom) + '" data-mail="' + esc(c.mail||'') + '"' + (c.nom === it.conducteur ? ' selected' : '') + '>' + esc(c.nom) + '</option>';
+      }).join('') +
+      '<option value="__autre__">Autre conducteur…</option>' +
+      (unassigned ? '' : '<option value="rh">Non attribué (RH)</option>');
     return '<div class="cell-actions" data-contrat="' + esc(it.contrat) + '">' +
       (unassigned ? '<span class="flag">À attribuer</span>' : '') +
       '<select class="assign-select">' + options + '</select>' +
@@ -356,18 +364,26 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
     var okMsg = box.querySelector('.ok-msg');
     btn.addEventListener('click', function(){
       var opt = sel.options[sel.selectedIndex];
-      if (!opt) return;
+      if (!opt || !opt.value){ okMsg.textContent = 'Choisissez un conducteur'; okMsg.hidden = false; return; }
+      var nom = opt.value, mail = opt.getAttribute('data-mail') || null;
+      if (nom === '__autre__'){
+        nom = (window.prompt('Nom du conducteur (Prénom NOM) :') || '').trim();
+        if (!nom) return;
+        mail = (window.prompt('Adresse mail de ' + nom + ' (pour lui envoyer ses contrats) :') || '').trim() || null;
+      }
+      if (nom === it.conducteur){ okMsg.textContent = 'Déjà attribué'; okMsg.hidden = false; return; }
       btn.disabled = true;
       fetch('/api/reassign', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ contrat: it.contrat, conducteur: opt.value, conducteurMail: opt.getAttribute('data-mail') || null })
+        body: JSON.stringify({ contrat: it.contrat, conducteur: nom, conducteurMail: mail })
       }).then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
         .then(function(){
-          it.conducteur = opt.value;
+          it.conducteur = nom;
+          okMsg.textContent = '✓';
           okMsg.hidden = false;
           btn.disabled = false;
-          setTimeout(function(){ if (typeof onDone === 'function') onDone(); }, 500);
+          setTimeout(refreshData, 500); // recharge tout : compteurs, échéances, liens
         }).catch(function(){
           btn.disabled = false;
           okMsg.textContent = 'Échec';
@@ -381,19 +397,27 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
   // conducteur. Demandé explicitement par Laura le 16/10 pour pouvoir
   // décider elle-même, en plus de l'attribution.
   function decisionCellHtml(it){
-    if (it.statut !== 'attente'){
+    if (it.statut && it.statut !== 'attente'){
       return '<span class="badge ' + it.statut + '">' + (STATUT_LABELS[it.statut] || it.statut) + '</span>' +
+        (it.valideLe ? ' <span class="comment-cell">le ' + esc(it.valideLe) + '</span>' : '') +
         (it.statut === 'prolonge' && it.nouvelleDateFin ? '<div class="comment-cell">Nouvelle fin : ' + esc(it.nouvelleDateFin) + '</div>' : '') +
-        (it.commentaire ? '<div class="comment-cell">“' + esc(it.commentaire) + '”</div>' : '');
+        (it.commentaire ? '<div class="comment-cell">“' + esc(it.commentaire) + '”</div>' : '') +
+        '<div class="cell-actions decision undo" data-contrat="' + esc(it.contrat) + '"><button class="dec-btn" data-decision="attente" title="Remettre le contrat en attente">Annuler la décision</button><span class="ok-msg" hidden></span></div>';
     }
     return '<div class="cell-actions decision" data-contrat="' + esc(it.contrat) + '">' +
       '<button class="dec-btn" data-decision="ok" title="Valider">✓ Valider</button>' +
       '<button class="dec-btn" data-decision="no" title="Refuser">✕ Refuser</button>' +
       '<button class="dec-btn" data-decision="prolonger" title="Prolonger">⏩</button>' +
       '<button class="dec-btn" data-decision="arreter" title="Arrêter">⏹</button>' +
-      '<input type="date" class="dec-date" hidden>' +
+      '<input type="date" class="dec-date" min="' + minProlongation(it) + '" hidden>' +
       '<span class="ok-msg" hidden></span>' +
     '</div>';
+  }
+  function minProlongation(it){
+    var f = parseFR(it.finFerme), t = new Date(); t.setHours(0, 0, 0, 0);
+    var d = f ? new Date(f + 86400000) : t;
+    if (d < t) d = t;
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
   function wireDecisionCell(container, it, onDone){
     var box = container.querySelector('.cell-actions.decision[data-contrat="' + String(it.contrat).replace(/"/g,'') + '"]');
@@ -407,11 +431,15 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ contrat: it.contrat, decision: decision, nouvelleDateFin: nouvelleDateFin || null })
-      }).then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      }).then(function(r){
+          if (r.status === 400) return r.json().then(function(j){ throw new Error(j && j.error ? j.error : 'refusé'); });
+          if (!r.ok) throw new Error('Échec — réessayez');
+          return r.json();
+        })
         .then(function(){ if (typeof onDone === 'function') onDone(); })
-        .catch(function(){
+        .catch(function(e){
           Array.prototype.forEach.call(buttons, function(b){ b.disabled = false; });
-          okMsg.textContent = 'Échec — réessayez';
+          okMsg.textContent = e && e.message ? e.message.charAt(0).toUpperCase() + e.message.slice(1) : 'Échec — réessayez';
           okMsg.hidden = false;
         });
     }
@@ -426,15 +454,16 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
         var decision = btn.getAttribute('data-decision');
         if (decision === 'prolonger'){
           if (dateInput.hidden){ dateInput.hidden = false; dateInput.focus(); return; }
-          if (!dateInput.value){ okMsg.textContent = 'Choisis une date'; okMsg.hidden = false; return; }
+          if (!dateInput.value){ okMsg.textContent = 'Choisissez une date'; okMsg.hidden = false; return; }
+          if (dateInput.value < dateInput.min){ okMsg.textContent = 'Date après la fin actuelle'; okMsg.hidden = false; return; }
           var p = dateInput.value.split('-');
           submit('prolonger', p[2] + '/' + p[1] + '/' + p[0]);
           return;
         }
-        if (decision === 'no' || decision === 'arreter'){
+        if (decision === 'no' || decision === 'arreter' || decision === 'attente'){
           if (confirming !== btn){
             confirming = btn;
-            btn.textContent = 'Sûr ? Reclique';
+            btn.textContent = 'Confirmer ?';
             setTimeout(function(){ if (confirming === btn){ confirming = null; btn.textContent = original; } }, 4000);
             return;
           }
@@ -454,18 +483,18 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
   var statusFilter = 'tous';
   var itemsState = { sortKey: 0, sortDir: 'asc', render: renderItems };
   var ITEMS_COLUMNS = [
+    // colonnes d'action juste après l'intérimaire : visibles sans défiler
     { label: 'Contrat', type: 'text', get: function(it){ return it.contrat; } },
     { label: 'Intérimaire', type: 'text', get: function(it){ return it.interimaire; } },
-    { label: 'Agence', type: 'text', get: function(it){ return it.agence; } },
+    { label: 'Statut / Décision', type: 'text', get: function(it){ return it.statut; } },
+    { label: 'Conducteur (attribution)', type: 'text', get: function(it){ return nomConducteur(it.conducteur); } },
     { label: 'Chantier', type: 'text', get: function(it){ return it.chantier; } },
-    { label: 'Conducteur', type: 'text', get: function(it){ return it.conducteur; } },
+    { label: 'THM 42h', type: 'num', get: function(it){ return it.thm42; } },
     { label: 'Début', type: 'date', get: function(it){ return it.debutMission; } },
     { label: 'Fin ferme', type: 'date', get: function(it){ return it.finFerme; } },
     { label: 'Salaire', type: 'num', get: function(it){ return it.salaire; } },
     { label: 'Facturé', type: 'num', get: function(it){ return it.tarifFacture; } },
-    { label: 'THM 42h', type: 'num', get: function(it){ return it.thm42; } },
-    { label: 'Statut / Décision', type: 'text', get: function(it){ return it.statut; } },
-    { label: 'Attribution', type: 'text', get: function(){ return ''; }, noSort: true },
+    { label: 'Agence', type: 'text', get: function(it){ return it.agence; } },
   ];
   document.querySelectorAll('#fStatus .chipbtn').forEach(function(b){
     b.addEventListener('click', function(){
@@ -507,16 +536,15 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
     return '<tr' + (unassigned ? ' class="unassigned"' : '') + '>' +
       '<td class="tabular">' + esc(it.contrat) + '</td>' +
       '<td>' + esc(it.interimaire) + '</td>' +
-      '<td>' + esc(it.agence || '—') + '</td>' +
+      '<td>' + decisionCellHtml(it) + '</td>' +
+      '<td>' + assignCellHtml(it) + '</td>' +
       '<td class="wrap-cell">' + esc(it.chantier || '—') + '</td>' +
-      '<td>' + esc(it.conducteur) + '</td>' +
+      '<td class="tabular">' + num(it.thm42) + '</td>' +
       '<td class="tabular">' + esc(it.debutMission || '—') + '</td>' +
       '<td class="tabular">' + esc(it.finFerme || '—') + '</td>' +
       '<td class="tabular">' + num(it.salaire) + '</td>' +
       '<td class="tabular">' + num(it.tarifFacture) + '</td>' +
-      '<td class="tabular">' + num(it.thm42) + '</td>' +
-      '<td>' + decisionCellHtml(it) + '</td>' +
-      '<td>' + assignCellHtml(it) + '</td>' +
+      '<td>' + esc(it.agence || '—') + '</td>' +
     '</tr>';
   }
 
@@ -546,10 +574,16 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
   // Une décision change le statut (donc les compteurs de la vue d'ensemble
   // et l'onglet Suivi) : on relit /api/dashboard.json plutôt que de
   // retoucher l'objet localement, pour être sûr que tout reste cohérent.
+  // recharge contrats ET liste des conducteurs (un conducteur ajouté par
+  // réattribution doit apparaître dans « Liens conducteurs »)
   function refreshData(){
-    fetch('/api/dashboard.json').then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
-      .then(function(data){ boot(data); })
-      .catch(function(){ renderItems(); });
+    Promise.all([
+      fetch('/api/dashboard.json').then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); }),
+      fetch('/api/conducteurs').then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; })
+    ]).then(function(res){
+      if (res[1] && res[1].conducteurs) CONDUCTEURS = res[1].conducteurs;
+      boot(res[0]);
+    }).catch(function(){ renderItems(); });
   }
 
   // -------------------------- Onglet Suivi (historique des décisions) --
@@ -606,7 +640,7 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
       '<td>' + esc(it.interimaire) + '</td>' +
       '<td>' + esc(it.agence || '—') + '</td>' +
       '<td class="wrap-cell">' + esc(it.chantier || '—') + '</td>' +
-      '<td>' + esc(it.conducteur) + '</td>' +
+      '<td>' + esc(nomConducteur(it.conducteur)) + '</td>' +
       '<td><span class="badge ' + it.statut + '">' + (STATUT_LABELS[it.statut] || it.statut) + '</span>' +
         (it.statut === 'prolonge' && it.nouvelleDateFin ? '<div class="comment-cell">Nouvelle fin : ' + esc(it.nouvelleDateFin) + '</div>' : '') + '</td>' +
       '<td class="wrap-cell comment-cell">' + (it.commentaire ? '“' + esc(it.commentaire) + '”' : '—') + '</td>' +
@@ -638,17 +672,18 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
   var fChantierEch = document.getElementById('fChantierEch');
   var fAgenceEch = document.getElementById('fAgenceEch');
   var fSearchEch = document.getElementById('fSearchEch');
-  var echState = { sortKey: 5, sortDir: 'asc', render: renderEch };
+  var echState = { sortKey: 2, sortDir: 'asc', render: renderEch };
   var ECH_COLUMNS = [
     { label: 'Contrat', type: 'text', get: function(it){ return it.contrat; } },
     { label: 'Intérimaire', type: 'text', get: function(it){ return it.interimaire; } },
-    { label: 'Agence', type: 'text', get: function(it){ return it.agence; } },
-    { label: 'Chantier', type: 'text', get: function(it){ return it.chantier; } },
-    { label: 'Conducteur', type: 'text', get: function(it){ return it.conducteur; } },
     { label: 'Fin ferme', type: 'date', get: function(it){ return it.finFerme; } },
+    { label: 'Statut / Décision', type: 'text', get: function(it){ return it.statut; } },
+    { label: 'Conducteur (attribution)', type: 'text', get: function(it){ return nomConducteur(it.conducteur); } },
+    { label: 'Chantier', type: 'text', get: function(it){ return it.chantier; } },
+    { label: 'THM 42h', type: 'num', get: function(it){ return it.thm42; } },
     { label: 'Salaire', type: 'num', get: function(it){ return it.salaire; } },
     { label: 'Facturé', type: 'num', get: function(it){ return it.tarifFacture; } },
-    { label: '', type: 'text', get: function(){ return ''; }, noSort: true },
+    { label: 'Agence', type: 'text', get: function(it){ return it.agence; } },
   ];
   [fConducteurEch, fChantierEch, fAgenceEch].forEach(function(s){ s.addEventListener('change', renderEch); });
   fSearchEch.addEventListener('input', renderEch);
@@ -659,17 +694,22 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
 
   function echRowHtml(it){
     var cls = it.enRetard ? 'retard' : (it.joursRestants <= 7 ? 'proche' : '');
-    var label = it.enRetard ? 'Dépassée' : ('J-' + it.joursRestants);
+    var label = it.enRetard ? 'Dépassée' : (it.joursRestants === 0 ? 'Aujourd’hui' : 'J-' + it.joursRestants);
+    var statut = it.statut && it.statut !== 'attente'
+      ? '<span class="badge ' + it.statut + '">' + (STATUT_LABELS[it.statut] || it.statut) + '</span>' +
+        (it.nouvelleDateFin ? '<div class="comment-cell">Nouvelle fin : ' + esc(it.nouvelleDateFin) + '</div>' : '')
+      : '<span class="badge attente">À valider</span>';
     return '<tr' + (it.conducteur === 'rh' ? ' class="unassigned"' : '') + '>' +
       '<td class="tabular">' + esc(it.contrat) + '</td>' +
       '<td>' + esc(it.interimaire) + '</td>' +
-      '<td>' + esc(it.agence || '—') + '</td>' +
-      '<td class="wrap-cell">' + esc(it.chantier || '—') + '</td>' +
-      '<td>' + esc(it.conducteur) + '</td>' +
       '<td class="tabular">' + esc(it.finFerme || '—') + (cls ? ' <span class="badge ' + cls + '">' + label + '</span>' : ' <span class="badge">' + label + '</span>') + '</td>' +
+      '<td>' + statut + '</td>' +
+      '<td>' + assignCellHtml(it) + '</td>' +
+      '<td class="wrap-cell">' + esc(it.chantier || '—') + '</td>' +
+      '<td class="tabular">' + num(it.thm42) + '</td>' +
       '<td class="tabular">' + num(it.salaire) + '</td>' +
       '<td class="tabular">' + num(it.tarifFacture) + '</td>' +
-      '<td>' + assignCellHtml(it) + '</td>' +
+      '<td>' + esc(it.agence || '—') + '</td>' +
     '</tr>';
   }
 
@@ -743,18 +783,20 @@ table.datatable tbody tr.unassigned{background:var(--warn-bg)}
 
   function boot(data){
     DATA = data;
-    document.getElementById('genTime').textContent = "maj " + DATA.genereLe;
+    document.getElementById('genTime').textContent = 'Mis à jour le ' + DATA.genereLe + (DATA.genereA ? ' à ' + DATA.genereA : '');
 
     var volumeParConducteur = {};
+    var aujourdhui = new Date(); aujourdhui.setHours(0, 0, 0, 0);
     DATA.items.forEach(function(it){
       if (it.statut !== 'attente') return;
+      if (parseFR(it.finFerme) && parseFR(it.finFerme) < aujourdhui.getTime()) return; // contrats terminés exclus
       var v = (it.tarifFacture || 0) * (it.heuresSemaine || 0);
       volumeParConducteur[it.conducteur] = (volumeParConducteur[it.conducteur] || 0) + v;
     });
     document.getElementById('ovGrid').innerHTML = DATA.apercu.map(function(c){
       var vol = volumeParConducteur[c.nom] || 0;
       return '<div class="ov-card">' +
-        '<div class="name">' + esc(c.nom) + '</div>' +
+        '<div class="name">' + esc(nomConducteur(c.nom)) + '</div>' +
         '<div class="ov-stats">' +
           '<div class="wait"><b class="tabular">' + c.enAttente + '</b><span>Attente</span></div>' +
           '<div class="ok"><b class="tabular">' + c.valides + '</b><span>Validés</span></div>' +

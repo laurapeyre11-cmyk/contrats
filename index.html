@@ -78,7 +78,17 @@ h1{font-size:22px; font-weight:800; margin:6px 0 0; line-height:1.15}
   background:var(--surface); color:var(--fg);
 }
 .search::placeholder{color:var(--fg-muted)}
+.search-row{display:flex; gap:8px}
+.search-row .search{flex:1; min-width:0}
+.filter-toggle{
+  flex:none; padding:0 14px; border-radius:10px; border:1px solid var(--border); background:var(--surface);
+  color:var(--fg); font-weight:600; font-size:14px; cursor:pointer; white-space:nowrap;
+}
+.filter-toggle[aria-expanded="true"]{border-color:var(--fg)}
+.filter-toggle .nb{display:inline-block; min-width:18px; margin-left:4px; padding:0 5px; border-radius:9px; background:var(--accent); color:var(--accent-ink); font-size:12px}
 .selects{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px}
+.statut-line{margin-top:8px; font-size:13px; color:var(--fg-muted)}
+.statut-line.ok{color:var(--good); font-weight:600}
 .field{min-width:0}
 .field label{display:block; font-size:11px; font-weight:600; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.05em; margin:0 0 3px 2px}
 .field select{
@@ -196,7 +206,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
 
 /* ---------- toast ---------- */
 .toast{
-  position:fixed; left:50%; transform:translateX(-50%); bottom:max(16px, env(safe-area-inset-bottom,0px));
+  position:fixed; left:50%; transform:translateX(-50%); top:max(10px, env(safe-area-inset-top,0px));
   z-index:20; width:min(560px, calc(100% - 32px)); display:flex; align-items:center; gap:12px;
   background:var(--toast-bg); color:var(--toast-fg); border-radius:12px; padding:12px 14px;
   box-shadow:0 8px 24px rgba(0,0,0,.25); font-size:14px; font-weight:500;
@@ -228,8 +238,11 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
 
   <div id="app" hidden>
     <section class="filters" aria-label="Filtres">
-      <input type="search" class="search" id="q" placeholder="Rechercher un intérimaire…" autocomplete="off" enterkeyhint="search">
-      <div class="selects">
+      <div class="search-row">
+        <input type="search" class="search" id="q" placeholder="Rechercher un intérimaire…" autocomplete="off" enterkeyhint="search" aria-label="Rechercher un intérimaire">
+        <button class="filter-toggle" id="filterToggle" aria-expanded="false" aria-controls="selects">Filtres</button>
+      </div>
+      <div class="selects" id="selects" hidden>
         <div class="field"><label for="f-chantier">Chantier</label><select id="f-chantier" data-key="chantier"></select></div>
         <div class="field"><label for="f-poste">Poste</label><select id="f-poste" data-key="poste"></select></div>
         <div class="field"><label for="f-mois">Fin de contrat</label><select id="f-mois" data-key="mois"></select></div>
@@ -325,6 +338,47 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
 
   function isDecided(it){ return !!it.statut && it.statut !== 'attente'; }
 
+  // Les libellés de chantier varient d'un contrat à l'autre (« Villa Valmer »,
+  // « VILLA VALMER », « STAM HANGAR LA VALBERELLE »…) : on les regroupe pour
+  // que le filtre (et « Tout valider ») prenne bien tous les contrats.
+  var MOTS_VIDES = { LA:1, LE:1, LES:1, DE:1, DU:1, DES:1, D:1, L:1, ET:1, CH:1, STAM:1 };
+  function libelleKey(s){
+    return noAccent(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim().split(' ')
+      .filter(function(w){ return w && !MOTS_VIDES[w]; }).join(' ');
+  }
+  function distance(a, b){ // nombre de lettres différentes (Levenshtein)
+    var d = [], i, j;
+    for (i = 0; i <= a.length; i++){ d[i] = [i]; }
+    for (j = 1; j <= b.length; j++){ d[0][j] = j; }
+    for (i = 1; i <= a.length; i++) for (j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+    return d[a.length][b.length];
+  }
+  var LIBELLES = { chantier: {}, agence: {} }; // clé -> libellé affiché
+  function regrouper(items, champ, cleChamp){
+    var parCle = {}, cles = [];
+    items.forEach(function(it){
+      var k = libelleKey(it[champ]);
+      if (!parCle[k]){ parCle[k] = {}; cles.push(k); }
+      parCle[k][it[champ] || ''] = (parCle[k][it[champ] || ''] || 0) + 1;
+    });
+    // fautes de frappe (« VALBERELLE » / « VALBARELLE ») : une lettre d'écart
+    var canon = {};
+    cles.sort(function(a, b){ return a.length - b.length; }).forEach(function(k){
+      var t = cles.filter(function(c){ return canon[c] === c && c.length >= 8 && Math.abs(c.length - k.length) <= 1 && distance(c, k) === 1; })[0];
+      canon[k] = t || k;
+    });
+    var compte = {};
+    cles.forEach(function(k){
+      var c = canon[k]; compte[c] = compte[c] || {};
+      Object.keys(parCle[k]).forEach(function(l){ compte[c][l] = (compte[c][l] || 0) + parCle[k][l]; });
+    });
+    Object.keys(compte).forEach(function(c){ // libellé le plus fréquent
+      LIBELLES[champ][c] = Object.keys(compte[c]).sort(function(a, b){ return compte[c][b] - compte[c][a]; })[0];
+    });
+    items.forEach(function(it){ it[cleChamp] = canon[libelleKey(it[champ])]; });
+  }
+
   function prep(it, chantier){
     if (!it.chantier && chantier) it.chantier = chantier;
     it._poste = posteKey(it.qualification);
@@ -358,7 +412,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     }).sort(function(a, b){ return (parseFR(b.valideLe) || 0) - (parseFR(a.valideLe) || 0); });
   }
 
-  var FIELD = { chantier: function(it){ return it.chantier || ''; }, poste: function(it){ return it._poste; }, mois: function(it){ return it._mois; }, agence: function(it){ return it.agence || ''; } };
+  var FIELD = { chantier: function(it){ return it._chantier || ''; }, poste: function(it){ return it._poste; }, mois: function(it){ return it._mois; }, agence: function(it){ return it._agence || ''; } };
   function matches(it, except){
     for (var k in FIELD){
       if (k !== except && filters[k] && FIELD[k](it) !== filters[k]) return false;
@@ -372,7 +426,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
   function hasFilters(){ return !!(filters.chantier || filters.poste || filters.mois || filters.agence || filters.q); }
 
   /* ---------- filtres ---------- */
-  var LABEL = { chantier: function(v){ return v || 'Sans chantier'; }, poste: posteLabel, mois: moisLabel, agence: function(v){ return v || 'Sans agence'; } };
+  var LABEL = { chantier: function(v){ return LIBELLES.chantier[v] || 'Sans chantier'; }, poste: posteLabel, mois: moisLabel, agence: function(v){ return LIBELLES.agence[v] || 'Sans agence'; } };
   var ALL = { chantier:'Tous', poste:'Tous', mois:'Tous', agence:'Toutes' };
   function fillSelects(items){
     Object.keys(FIELD).forEach(function(k){
@@ -393,8 +447,18 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     });
     // agence : seulement utile s'il y en a plusieurs
     var agences = {};
-    pending.concat(echeances).forEach(function(it){ agences[it.agence || ''] = 1; });
+    pending.concat(echeances).forEach(function(it){ agences[it._agence || ''] = 1; });
     $('field-agence').hidden = Object.keys(agences).length < 2 && !filters.agence;
+    var actifs = ['chantier', 'poste', 'mois', 'agence'].filter(function(k){ return filters[k]; }).length;
+    $('filterToggle').innerHTML = 'Filtres' + (actifs ? '<span class="nb">' + actifs + '</span>' : '');
+  }
+  $('filterToggle').addEventListener('click', function(){
+    var ouvert = $('selects').hidden;
+    $('selects').hidden = !ouvert;
+    $('filterToggle').setAttribute('aria-expanded', String(ouvert));
+  });
+  if (window.matchMedia && window.matchMedia('(min-width: 700px)').matches){
+    $('selects').hidden = false; $('filterToggle').setAttribute('aria-expanded', 'true');
   }
   Object.keys(FIELD).forEach(function(k){
     $('f-' + k).addEventListener('change', function(e){ filters[k] = e.target.value; render(); });
@@ -419,27 +483,34 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
       body: JSON.stringify(Object.assign({ contrats: contrats, decision: decision, lien: LIEN }, extra || {}))
     }).then(function(r){
       if (r.status === 401 || r.status === 403) throw new Error('acces');
+      if (r.status === 429) throw new Error('essais');
+      if (r.status === 400) return r.json().then(function(j){ var e = new Error('refus'); e.detail = j && j.error; throw e; });
       if (!r.ok) throw new Error('http');
       return r.json();
     });
   }
+  function aujourdhuiFR(){
+    var t = new Date();
+    return String(t.getDate()).padStart(2, '0') + '/' + String(t.getMonth() + 1).padStart(2, '0') + '/' + t.getFullYear();
+  }
   function applyLocal(contrats, decision, extra){
-    var today = new Date();
-    var fr = String(today.getDate()).padStart(2, '0') + '/' + String(today.getMonth() + 1).padStart(2, '0') + '/' + today.getFullYear();
     contrats.forEach(function(c){
       (byContrat[c] || []).forEach(function(it){
         it.statut = STATUT[decision];
         it.commentaire = (extra && extra.commentaire) || null;
-        it.valideLe = decision === 'attente' ? null : fr;
+        it.valideLe = decision === 'attente' ? null : aujourdhuiFR();
         if (extra && extra.nouvelleDateFin) it.nouvelleDateFin = extra.nouvelleDateFin; else delete it.nouvelleDateFin;
+        it._mois = moisKey(it.nouvelleDateFin || it.finFerme);
       });
     });
   }
   function errorText(e){
-    return e && e.message === 'acces'
-      ? "Ce contrat ne vous est plus attribué. Rechargez la page ou contactez le service RH."
-      : "Pas de connexion ? L'enregistrement a échoué, réessayez.";
+    if (e && e.message === 'acces') return "Ce contrat ne vous est plus attribué. Rechargez la page ou contactez le service RH.";
+    if (e && e.message === 'essais') return "Trop d'essais : réessayez dans 15 minutes.";
+    if (e && e.message === 'refus') return e.detail ? e.detail.charAt(0).toUpperCase() + e.detail.slice(1) + '.' : "Enregistrement refusé.";
+    return "Pas de connexion ? L'enregistrement a échoué, réessayez.";
   }
+  function estTermine(it){ var f = parseFR(finEffective(it)); return !!f && f < today0(); }
 
   /* ---------- toast + annuler ---------- */
   var toastTimer = null, undoFn = null;
@@ -456,28 +527,36 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     var fn = undoFn; undoFn = null; $('toast').hidden = true;
     if (fn) fn();
   });
-  // Annuler = revenir à l'état d'avant : "validé" si le contrat l'était
-  // (ex. prolongation d'un contrat validé), sinon "à traiter".
+  // Annuler = revenir exactement à l'état d'avant (statut, commentaire, date)
+  var DECISION_DE = { valide:'ok', refuse:'no', prolonge:'prolonger', arrete:'arreter' };
+  var MSG_RETOUR = {
+    attente: 'Annulé : de nouveau à traiter.', ok: 'Annulé : le contrat redevient « Validé ».', no: 'Annulé : le contrat redevient « Refusé ».',
+    prolonger: 'Annulé : la prolongation est rétablie.', arreter: 'Annulé : l’arrêt est rétabli.'
+  };
+  function photo(contrat){
+    var it = (byContrat[contrat] || [{}])[0];
+    return { statut: it.statut, commentaire: it.commentaire, nouvelleDateFin: it.nouvelleDateFin };
+  }
   function undoable(contrats, avant){
-    var retour = avant === 'valide' ? 'ok' : 'attente';
+    var retour = DECISION_DE[avant.statut] || 'attente';
+    var extra = retour === 'attente' ? null : { commentaire: avant.commentaire || '', nouvelleDateFin: avant.nouvelleDateFin };
     return function(){
-      sendDecision(contrats, retour).then(function(){
-        applyLocal(contrats, retour);
+      sendDecision(contrats, retour, extra).then(function(){
+        applyLocal(contrats, retour, extra);
         render();
-        toast(retour === 'ok' ? 'Annulé : le contrat redevient « Validé ».'
-          : (contrats.length > 1 ? 'Annulé : les ' + contrats.length + ' contrats sont de nouveau à traiter.' : 'Annulé : le contrat est de nouveau à traiter.'));
+        toast(contrats.length > 1 && retour === 'attente' ? 'Annulé : les ' + contrats.length + ' contrats sont de nouveau à traiter.' : MSG_RETOUR[retour]);
       }).catch(function(e){ toast(errorText(e), null, true); });
     };
   }
 
   // retire la carte en douceur puis redessine
   function decideAndAnimate(card, contrats, decision, extra, msg){
-    var avant = (byContrat[contrats[0]] || [{}])[0].statut;
+    var avant = photo(contrats[0]);
     var btns = card ? card.querySelectorAll('button') : [];
     Array.prototype.forEach.call(btns, function(b){ b.disabled = true; });
     return sendDecision(contrats, decision, extra).then(function(){
       applyLocal(contrats, decision, extra);
-      toast(msg, decision === 'attente' ? null : undoable(contrats, avant));
+      toast(msg, undoable(contrats, avant));
       if (card){ card.classList.add('leaving'); setTimeout(render, 230); } else render();
     }).catch(function(e){
       Array.prototype.forEach.call(btns, function(b){ b.disabled = false; });
@@ -538,10 +617,13 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     var badge = (j != null && j < 0) || it.enRetard
       ? '<span class="chip bad">Dépassée</span>'
       : (j === 0 ? '<span class="chip warn">Aujourd’hui</span>' : '<span class="chip' + (j <= 7 ? ' warn' : '') + '">Dans ' + plural(j, 'jour', 'jours') + '</span>');
-    var minDate = new Date(Math.max(Date.now(), fin ? fin.getTime() : 0));
+    var minDate = dateMinProlongation(it);
     var minIso = minDate.getFullYear() + '-' + String(minDate.getMonth() + 1).padStart(2, '0') + '-' + String(minDate.getDate()).padStart(2, '0');
+    var statut = it.statut === 'valide'
+      ? '<div class="statut-line ok">✓ Contrat validé' + (it.valideLe ? ' le ' + esc(it.valideLe) : '') + '</div>'
+      : '<div class="statut-line">Contrat pas encore validé : prolonger ou arrêter vaut aussi validation.</div>';
     return '<article class="card" data-contrat="' + esc(it.contrat) + '">' +
-      head(it, badge) + metaRow(it, true) +
+      head(it, badge) + metaRow(it, true) + statut +
       '<div class="facts"><div class="fact"><div class="lbl">Fin prévue</div><div class="val big tabular">' + esc(it.finFerme || '—') + '</div></div>' +
         thmFact(it) + '</div>' +
       '<div class="actions">' +
@@ -560,6 +642,13 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
         '<div class="row"><button class="cancel" data-act="close">Annuler</button><button class="submit danger" data-act="confirm-arreter">Confirmer l’arrêt</button></div>' +
       '</div>' +
     '</article>';
+  }
+
+  // lendemain de la fin prévue, et jamais avant aujourd'hui
+  function dateMinProlongation(it){
+    var fin = parseFR(it.finFerme);
+    var d = fin ? new Date(fin.getFullYear(), fin.getMonth(), fin.getDate() + 1) : today0();
+    return d < today0() ? today0() : d;
   }
 
   function enCoursCard(it){
@@ -612,7 +701,9 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     }
     function comment(){ var p = btn.closest('.panel'); var t = p && p.querySelector('textarea'); return t ? t.value.trim() : ''; }
 
-    if (act === 'ok') decideAndAnimate(card, [contrat], 'ok', null, 'Validé — à retrouver dans « En cours ».').catch(function(){});
+    var item = (byContrat[contrat] || [{}])[0];
+    if (act === 'ok') decideAndAnimate(card, [contrat], 'ok', null,
+      estTermine(item) ? 'Validé — contrat terminé, à retrouver dans « Historique ».' : 'Validé — à retrouver dans « En cours ».').catch(function(){});
     else if (act === 'refuse' || act === 'prolonger' || act === 'arreter'){
       if (btn.getAttribute('aria-pressed') === 'true') closePanels(); else openPanel(act);
     }
@@ -624,11 +715,21 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
       var d = isoToFR(p.querySelector('input[type=date]').value);
       var err = p.querySelector('.err');
       if (!d){ err.textContent = 'Choisissez la nouvelle date de fin.'; err.hidden = false; return; }
+      var mini = dateMinProlongation(item);
+      if (parseFR(d) < mini){
+        err.textContent = 'La nouvelle date doit être au plus tôt le ' + String(mini.getDate()).padStart(2, '0') + '/' + String(mini.getMonth() + 1).padStart(2, '0') + '/' + mini.getFullYear() + '.';
+        err.hidden = false; return;
+      }
       err.hidden = true;
       decideAndAnimate(card, [contrat], 'prolonger', { commentaire: comment(), nouvelleDateFin: d }, 'Prolongation demandée.').catch(function(){});
     }
     else if (act === 'reset'){
-      decideAndAnimate(card, [contrat], 'attente', null, 'Décision annulée : le contrat est de nouveau à traiter.').catch(function(){});
+      // annuler une prolongation ou un arrêt : le contrat reste validé
+      if (item.statut === 'prolonge' || item.statut === 'arrete'){
+        decideAndAnimate(card, [contrat], 'ok', null, (item.statut === 'prolonge' ? 'Prolongation annulée' : 'Arrêt annulé') + ' : le contrat reste « Validé ».').catch(function(){});
+      } else {
+        decideAndAnimate(card, [contrat], 'attente', null, 'Décision annulée : le contrat est de nouveau à traiter.').catch(function(){});
+      }
     }
   }
   ['list-pending', 'list-encours', 'list-echeances', 'list-history'].forEach(function(id){ $(id).addEventListener('click', onCardClick); });
@@ -638,10 +739,10 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
   $('bulkStart').addEventListener('click', function(){
     var n = visiblePending.length;
     var detail = [];
-    if (filters.chantier) detail.push('chantier ' + filters.chantier);
+    if (filters.chantier) detail.push('chantier ' + LABEL.chantier(filters.chantier));
     if (filters.poste) detail.push(posteLabel(filters.poste).toLowerCase());
     if (filters.mois) detail.push('fin en ' + moisLabel(filters.mois).toLowerCase());
-    if (filters.agence) detail.push(filters.agence);
+    if (filters.agence) detail.push(LABEL.agence(filters.agence));
     if (filters.q) detail.push('« ' + filters.q + ' »');
     $('bulkText').innerHTML = 'Valider <strong>' + plural(n, 'contrat', 'contrats') + '</strong>' +
       (detail.length ? ' (' + esc(detail.join(', ')) + ')' : ', c’est-à-dire tous vos contrats en attente') + ' ?';
@@ -653,10 +754,22 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     var contrats = visiblePending.map(function(it){ return it.contrat; });
     $('bulkGo').disabled = $('bulkCancel').disabled = true;
     $('bulkGo').textContent = 'Enregistrement…';
-    sendDecision(contrats, 'ok').then(function(){
-      applyLocal(contrats, 'ok');
+    sendDecision(contrats, 'ok', { ignorerNonAttribues: true }).then(function(rep){
+      var ignores = (rep && rep.ignores) || [];
+      var faits = contrats.filter(function(c){ return ignores.indexOf(c) === -1; });
+      applyLocal(faits, 'ok');
+      // contrats réattribués entre-temps à un autre conducteur : on les retire
+      if (ignores.length){
+        pending = pending.filter(function(it){ return ignores.indexOf(it.contrat) === -1; });
+        echeances = echeances.filter(function(it){ return ignores.indexOf(it.contrat) === -1; });
+      }
+      var termines = faits.filter(function(c){ return estTermine(byContrat[c][0]); }).length;
+      var msg = plural(faits.length, 'contrat validé', 'contrats validés') +
+        (termines === 0 ? ' — à retrouver dans « En cours ».' : termines === faits.length ? ' — terminés, à retrouver dans « Historique ».'
+          : ' : ' + (faits.length - termines) + ' dans « En cours », ' + termines + ' terminé(s) dans « Historique ».') +
+        (ignores.length ? ' ' + plural(ignores.length, 'contrat ne vous est', 'contrats ne vous sont') + ' plus attribué(s).' : '');
       $('bulkStart').hidden = false; $('bulkConfirm').hidden = true;
-      toast(plural(contrats.length, 'contrat validé', 'contrats validés') + ' — à retrouver dans « En cours ».', undoable(contrats, 'attente'));
+      toast(msg, undoable(faits, { statut: 'attente' }));
       render();
     }).catch(function(e){
       $('bulkErr').textContent = errorText(e); $('bulkErr').hidden = false;
@@ -698,7 +811,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     } else if (tab === 'echeances'){
       var groups = {}, order = [];
       shown.slice().sort(function(a, b){ return (parseFR(a.finFerme) || 0) - (parseFR(b.finFerme) || 0); }).forEach(function(it){
-        var g = it.chantier || '—';
+        var g = LIBELLES.chantier[it._chantier] || it.chantier || '—';
         if (!groups[g]){ groups[g] = []; order.push(g); }
         groups[g].push(it);
       });
@@ -743,7 +856,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     $('message').innerHTML = '<div class="empty"><div class="big">' + esc(title) + '</div><p>' + esc(text) + '</p></div>';
   }
 
-  var m = location.pathname.match(/^\/c\/([^/]+)\/?$/);
+  var m = location.pathname.match(/^\/c\/([^/]+)\/?$/i);
   if (!m){
     showMessage('Lien personnel requis', "Cette page affiche les contrats d'un conducteur via son lien personnel. Si vous n'avez pas reçu le vôtre, contactez le service RH.");
     return;
@@ -751,11 +864,12 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
   LIEN = decodeURIComponent(m[1]);
 
   fetch('/api/moi/' + encodeURIComponent(LIEN), { cache: 'no-store' }).then(function(r){
-    if (r.status === 404 || r.status === 429) throw new Error('lien');
+    if (r.status === 404) throw new Error('lien');
+    if (r.status === 429) throw new Error('essais');
     if (!r.ok) throw new Error('http');
     return r.json();
   }).then(function(data){
-    $('genTime').textContent = 'Mis à jour le ' + (data.genereLe || '—');
+    $('genTime').textContent = 'Mis à jour le ' + (data.genereLe || '—') + (data.genereA ? ' à ' + data.genereA : '');
     $('pageTitle').textContent = data.nom || 'Mes contrats';
     document.title = 'Contrats — ' + (data.nom || 'STAM');
     pending = (data.items || []).map(function(it){ return prep(it); });
@@ -764,10 +878,13 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     echeances.forEach(function(it){
       if (it.thm42 == null){ var t = (byContrat[it.contrat] || []).filter(function(x){ return x.thm42 != null; })[0]; if (t){ it.thm42 = t.thm42; it.thm39 = t.thm39; } }
     });
+    regrouper(pending.concat(echeances), 'chantier', '_chantier');
+    regrouper(pending.concat(echeances), 'agence', '_agence');
     $('tabs').hidden = false; $('app').hidden = false;
     render();
   }).catch(function(e){
-    if (e.message === 'lien') showMessage('Lien invalide', "Ce lien ne correspond à aucun conducteur. Vérifiez qu'il est complet, ou demandez votre lien au service RH.");
+    if (e.message === 'essais') showMessage('Trop d’essais', 'Trop de liens incorrects ont été essayés depuis cette connexion. Réessayez dans 15 minutes.');
+    else if (e.message === 'lien') showMessage('Lien invalide', "Ce lien ne correspond à aucun conducteur. Vérifiez qu'il est complet, ou demandez votre lien au service RH.");
     else showMessage('Données indisponibles', 'Impossible de charger les contrats pour le moment. Réessayez dans une minute (le site peut mettre 30 secondes à se réveiller).');
   });
 })();

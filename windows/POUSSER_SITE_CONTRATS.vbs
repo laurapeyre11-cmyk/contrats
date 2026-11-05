@@ -38,15 +38,29 @@ fichierConfig = dossierStam & "\site_contrats.ini"
 fichierConnus = dossierStam & "\contrats_annonces.txt"
 fichierJournal = dossierStam & "\site_contrats.log"
 
-Dim adresse, code, derniere
+' --- un seul envoi à la fois (tâche automatique + double-clic) -------------
+Dim fichierVerrou
+fichierVerrou = dossierStam & "\envoi_en_cours.lock"
+If fso.FileExists(fichierVerrou) Then
+  ' verrou de plus de 15 minutes = envoi précédent interrompu : on l'ignore
+  If DateDiff("n", fso.GetFile(fichierVerrou).DateLastModified, Now) < 15 Then
+    If Not silencieux Then MsgBox "Une mise à jour du site est déjà en cours. Réessayez dans une minute.", vbInformation, TITRE
+    WScript.Quit 3
+  End If
+End If
+fso.CreateTextFile(fichierVerrou, True).Close
+
+Dim adresse, code, derniere, nbEchecs
 LireConfig
 If adresse = "" Or code = "" Then
-  If silencieux Then Journal "Pas encore configuré : lancer POUSSER_SITE_CONTRATS.vbs une fois à la main.": WScript.Quit
-  adresse = InputBox("Adresse du site des contrats :", TITRE, "https://contrats.onrender.com")
-  If adresse = "" Then WScript.Quit
-  code = InputBox("Code secret du site (valeur de REFRESH_SECRET dans Render > Environment) :", TITRE)
-  If code = "" Then WScript.Quit
-  If Right(adresse, 1) = "/" Then adresse = Left(adresse, Len(adresse) - 1)
+  If silencieux Then Journal "Pas encore configuré : lancer POUSSER_SITE_CONTRATS.vbs une fois à la main.": Fin 0
+  If adresse = "" Then
+    adresse = Trim(InputBox("Adresse du site des contrats (Render, ex. https://contrats.onrender.com) :", TITRE, "https://contrats.onrender.com"))
+    If adresse = "" Then Fin 2
+    If Right(adresse, 1) = "/" Then adresse = Left(adresse, Len(adresse) - 1)
+  End If
+  code = Trim(InputBox("Code secret du site (valeur de REFRESH_SECRET dans Render > Environment) :", TITRE))
+  If code = "" Then Fin 2
   EcrireConfig
 End If
 
@@ -57,8 +71,9 @@ If Not fso.FileExists(cheminValidation) Then
   Erreur "Fichier introuvable : " & cheminValidation
 End If
 dateFichier = CStr(fso.GetFile(cheminValidation).DateLastModified)
-' en automatique : rien à faire si le fichier n'a pas changé depuis le dernier envoi
-If silencieux And dateFichier = derniere Then WScript.Quit
+If fso.FileExists(cheminConducteurs) Then dateFichier = dateFichier & " | " & CStr(fso.GetFile(cheminConducteurs).DateLastModified)
+' en automatique : rien à faire si les fichiers n'ont pas changé depuis le dernier envoi
+If silencieux And dateFichier = derniere Then Fin 0
 
 ' --- contrats déjà annoncés aux conducteurs --------------------------------
 Dim premier, connus
@@ -106,11 +121,14 @@ If message = "" Then message = Left(reponse, 300)
 If statut = 401 Then
   If Not silencieux Then code = "": EcrireConfig
   Erreur "Le code secret est incorrect : le site n'a pas été mis à jour." & vbCrLf & _
-    "Relancez POUSSER_SITE_CONTRATS.vbs à la main et saisissez la valeur de REFRESH_SECRET (Render > Environment)."
+    "Double-cliquez sur POUSSER_SITE_CONTRATS.vbs et saisissez la valeur de REFRESH_SECRET (Render > Environment)."
+ElseIf statut = 0 Then
+  Erreur "Le site ne répond pas (connexion internet, ou site en panne) : il n'a pas été mis à jour." & vbCrLf & message
 ElseIf statut <> 200 Then
   Erreur "Le site n'a pas pu être mis à jour (code " & statut & ")." & vbCrLf & message
 End If
 Journal "Site mis à jour : " & message
+nbEchecs = 0
 
 ' --- mails aux conducteurs ------------------------------------------------
 Dim envoyes, brouillons, echecs, i, rapportMails
@@ -120,13 +138,12 @@ If nbMails > 0 Then
   faireEnvoi = True
   If premier Then
     ' tout premier envoi : un mail de lancement par conducteur, avec son lien
-    If silencieux Then
-      faireEnvoi = False
-    Else
-      faireEnvoi = (MsgBox("Le site est à jour." & vbCrLf & vbCrLf & _
-        "Envoyer maintenant à chaque conducteur (" & nbMails & ") un mail avec son lien personnel vers le site ?" & vbCrLf & vbCrLf & _
-        "Ensuite, chaque nouveau contrat signé leur sera envoyé automatiquement.", vbYesNo + vbQuestion, TITRE) = vbYes)
-    End If
+    ' (question posée aussi en automatique : la tâche tourne dans la session)
+    faireEnvoi = (MsgBox("Le site est à jour." & vbCrLf & vbCrLf & _
+      "Envoyer maintenant à chaque conducteur (" & nbMails & ") un mail avec son lien personnel vers le site ?" & vbCrLf & vbCrLf & _
+      "Oui : ils reçoivent leur lien tout de suite." & vbCrLf & _
+      "Non : ils le recevront avec leur prochain contrat signé." & vbCrLf & vbCrLf & _
+      "Ensuite, chaque nouveau contrat signé leur sera envoyé automatiquement.", vbYesNo + vbQuestion, TITRE) = vbYes)
   End If
   If faireEnvoi Then
     Dim ol
@@ -140,6 +157,7 @@ If nbMails > 0 Then
       For i = 0 To nbMails - 1
         EnvoyerMail ol, mails(i)(0), mails(i)(1), mails(i)(2), mails(i)(3)
       Next
+      AttendreBoiteEnvoi ol
     End If
   End If
 End If
@@ -148,7 +166,8 @@ End If
 ' volontairement pas envoyés au premier lancement)
 If nouveauxConnus <> "" And echecs = "" Then EcrireTexte fichierConnus, Replace(nouveauxConnus, vbLf, vbCrLf)
 ' en cas d'échec Outlook, on réessaiera au prochain passage
-If echecs = "" Then derniere = dateFichier: EcrireConfig
+If echecs = "" Then derniere = dateFichier
+EcrireConfig
 
 rapportMails = ""
 If envoyes > 0 Then rapportMails = rapportMails & vbCrLf & envoyes & " mail(s) envoyé(s) aux conducteurs."
@@ -161,6 +180,7 @@ If Not silencieux Then
 ElseIf brouillons > 0 Or echecs <> "" Or InStr(message, "ATTENTION") > 0 Then
   MsgBox message & vbCrLf & rapportMails, vbExclamation, TITRE
 End If
+Fin 0
 
 ' ============================================================================
 Sub EnvoyerMail(ol, a, objet, html, pjs)
@@ -202,6 +222,29 @@ Sub EnvoyerMail(ol, a, objet, html, pjs)
   On Error GoTo 0
 End Sub
 
+' Outlook ouvert par le script peut se refermer avant d'avoir tout envoyé :
+' on attend que la boîte d'envoi soit vide (1 min 30 au plus).
+Sub AttendreBoiteEnvoi(ol)
+  Dim boite, t
+  On Error Resume Next
+  ol.Session.SendAndReceive False
+  Set boite = ol.Session.GetDefaultFolder(4)
+  For t = 1 To 45
+    If boite.Items.Count = 0 Then Exit For
+    WScript.Sleep 2000
+  Next
+  If boite.Items.Count > 0 Then Journal "Attention : " & boite.Items.Count & " mail(s) encore dans la boîte d'envoi d'Outlook."
+  On Error GoTo 0
+End Sub
+
+' fin du script : on libère le verrou
+Sub Fin(codeSortie)
+  On Error Resume Next
+  If fso.FileExists(fichierVerrou) Then fso.DeleteFile fichierVerrou, True
+  On Error GoTo 0
+  WScript.Quit codeSortie
+End Sub
+
 Sub Envoyer(texte, ByRef st, ByRef rep)
   Dim http
   On Error Resume Next
@@ -220,10 +263,18 @@ Sub Envoyer(texte, ByRef st, ByRef rep)
   On Error GoTo 0
 End Sub
 
+' En automatique, on prévient à la 3e erreur d'affilée (30 min), puis
+' toutes les 3 heures, pour ne pas afficher une fenêtre toutes les 10 min.
 Sub Erreur(texte)
   Journal "ERREUR : " & Replace(texte, vbCrLf, " ")
-  If Not silencieux Then MsgBox texte, vbExclamation, TITRE
-  WScript.Quit 1
+  nbEchecs = nbEchecs + 1
+  EcrireConfig
+  If Not silencieux Then
+    MsgBox texte, vbExclamation, TITRE
+  ElseIf nbEchecs Mod 18 = 3 Then
+    MsgBox texte & vbCrLf & vbCrLf & "(Mise à jour automatique : " & nbEchecs & " essais ratés d'affilée. Journal : " & fichierJournal & ")", vbExclamation, TITRE
+  End If
+  Fin 1
 End Sub
 
 Function LireBase64(chemin)
@@ -286,7 +337,7 @@ End Sub
 
 Sub LireConfig()
   Dim f, l
-  adresse = "": code = "": derniere = ""
+  adresse = "": code = "": derniere = "": nbEchecs = 0
   If Not fso.FileExists(fichierConfig) Then Exit Sub
   Set f = fso.OpenTextFile(fichierConfig, 1)
   Do Until f.AtEndOfStream
@@ -294,6 +345,7 @@ Sub LireConfig()
     If Left(l, 8) = "adresse=" Then adresse = Trim(Mid(l, 9))
     If Left(l, 5) = "code=" Then code = Trim(Mid(l, 6))
     If Left(l, 9) = "derniere=" Then derniere = Trim(Mid(l, 10))
+    If Left(l, 7) = "echecs=" And IsNumeric(Mid(l, 8)) Then nbEchecs = CLng(Mid(l, 8))
   Loop
   f.Close
 End Sub
@@ -304,5 +356,6 @@ Sub EcrireConfig()
   f.WriteLine "adresse=" & adresse
   f.WriteLine "code=" & code
   f.WriteLine "derniere=" & derniere
+  f.WriteLine "echecs=" & nbEchecs
   f.Close
 End Sub
