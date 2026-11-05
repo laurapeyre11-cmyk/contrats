@@ -1,0 +1,4 @@
+node_modules/
+decisions.json
+assignments.json
+*.tmp

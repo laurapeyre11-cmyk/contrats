@@ -3,16 +3,16 @@
 // Architecture volontairement simple, et volontairement a plat (tous les
 // fichiers a la racine du depot, pas de sous-dossiers) pour que le depot
 // GitHub reste facile a mettre a jour a la main depuis l'interface web :
-//  - GET /            sert index.html : page PUBLIQUE, conducteurs, sans
-//    montants pour la vue d'ensemble.
+//  - GET /            page d'accueil (invite a utiliser son lien personnel).
+//  - GET /c/<slug>   page personnelle d'un conducteur. Ses donnees viennent
+//    de GET /api/moi/<slug> (uniquement ses contrats).
 //  - GET /dashboard (+ /api/dashboard.json) : page PRIVEE RH, avec montants,
 //    protegee par une authentification HTTP Basic (identifiant/mot de passe
 //    definis uniquement via des variables d'environnement Render, jamais
 //    dans ce code source).
-//  - GET /api/data.json : donnees publiques (contrats a valider + echeances
-//    + apercu sans montants), lues depuis data.json.
-//  - POST /api/decision : un conducteur valide/refuse/prolonge/arrete un
-//    contrat directement depuis la page publique. Enregistre sur disque
+//  - GET /api/data.json (RH) : toutes les donnees de la page conducteurs.
+//  - POST /api/decision : un conducteur (depuis sa page) ou RH
+//    valide/refuse/prolonge/arrete un ou plusieurs contrats. Enregistre sur disque
 //    (decisions.json) et applique immediatement, sans e-mail ni copier-coller.
 //  - GET /api/conducteurs (RH) + POST /api/reassign (RH) : attribuer ou
 //    reattribuer le conducteur responsable d'un contrat.
@@ -332,6 +332,20 @@ function timingSafeEqual(a, b) {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
+function isRhRequest(req) {
+  const user = process.env.DASHBOARD_USER;
+  const pass = process.env.DASHBOARD_PASS;
+  if (!user || !pass) return false;
+  const header = req.headers.authorization || '';
+  const [scheme, encoded] = header.split(' ');
+  if (scheme !== 'Basic' || !encoded) return false;
+  const decoded = Buffer.from(encoded, 'base64').toString('utf-8');
+  const sep = decoded.indexOf(':');
+  const u = sep >= 0 ? decoded.slice(0, sep) : decoded;
+  const p = sep >= 0 ? decoded.slice(sep + 1) : '';
+  return timingSafeEqual(u, user) && timingSafeEqual(p, pass);
+}
+
 function requireRhAuth(req, res, next) {
   const user = process.env.DASHBOARD_USER;
   const pass = process.env.DASHBOARD_PASS;
@@ -341,17 +355,34 @@ function requireRhAuth(req, res, next) {
       'dans les variables d\'environnement du service Render.'
     );
   }
-  const header = req.headers.authorization || '';
-  const [scheme, encoded] = header.split(' ');
-  if (scheme === 'Basic' && encoded) {
-    const decoded = Buffer.from(encoded, 'base64').toString('utf-8');
-    const sep = decoded.indexOf(':');
-    const u = sep >= 0 ? decoded.slice(0, sep) : decoded;
-    const p = sep >= 0 ? decoded.slice(sep + 1) : '';
-    if (timingSafeEqual(u, user) && timingSafeEqual(p, pass)) return next();
-  }
+  if (isRhRequest(req)) return next();
   res.set('WWW-Authenticate', 'Basic realm="STAM RH"');
   return res.status(401).send('Authentification requise.');
+}
+
+// ---------------------------------------------------------------------
+// Lien personnel de chaque conducteur : /c/<slug>. La page ne recoit que
+// les contrats de CE conducteur (GET /api/moi/<slug>), et il ne peut
+// decider que sur ses propres contrats. Les donnees de tout le monde
+// (/api/data.json) restent reservees a RH.
+// ---------------------------------------------------------------------
+function linkPath(slug) {
+  return '/c/' + encodeURIComponent(slug);
+}
+
+function knownSlug(slug) {
+  if (!slug) return null;
+  slug = String(slug);
+  return (served.data.conducteurs[slug] || served.data.echeances[slug]) ? slug : null;
+}
+
+function contratsOfSlug(slug) {
+  const set = new Set();
+  const c = served.data.conducteurs[slug];
+  if (c) (c.items || []).forEach((it) => set.add(String(it.contrat)));
+  const e = served.data.echeances[slug];
+  if (e) (e.chantiers || []).forEach((g) => (g.items || []).forEach((it) => set.add(String(it.contrat))));
+  return set;
 }
 
 // ---------------------------------------------------------------------
@@ -367,7 +398,7 @@ app.get('/', (req, res) => {
 // script cote client lit le slug dans l'URL et affiche directement le bon
 // conducteur, sans exposer les noms des autres. La liste de ces liens est
 // disponible dans le tableau de bord RH (authentifie).
-app.get('/c/:slug', (req, res) => {
+app.get(['/c/:slug', '/c/:slug/:ancienCode'], (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
@@ -378,7 +409,18 @@ app.get('/dashboard', requireRhAuth, (req, res) => {
 // ---------------------------------------------------------------------
 // Donnees
 // ---------------------------------------------------------------------
-app.get('/api/data.json', (req, res) => res.json(served.data));
+// Toutes les donnees : reserve a RH (contient les contrats de tout le monde).
+app.get('/api/data.json', requireRhAuth, (req, res) => res.json(served.data));
+
+// Donnees d'UN conducteur (sa page personnelle).
+app.get('/api/moi/:slug', (req, res) => {
+  const slug = knownSlug(req.params.slug);
+  if (!slug) return res.status(404).json({ error: 'lien invalide' });
+  const c = served.data.conducteurs[slug] || { nom: '', items: [] };
+  const e = served.data.echeances[slug] || { chantiers: [] };
+  res.set('Cache-Control', 'no-store');
+  res.json({ genereLe: served.data.genereLe, slug, nom: c.nom || e.nom || '', items: c.items || [], echeances: e.chantiers || [] });
+});
 app.get('/api/dashboard.json', requireRhAuth, (req, res) => res.json(served.dashboard));
 
 app.get('/api/health', (req, res) => res.json({
@@ -446,32 +488,75 @@ const DECISION_MAIL_LABELS = {
   attente: 'Pas encore decide',
 };
 
+async function sendBulkDecisionEmail(contrats, decisionInfo) {
+  const apiKey = process.env.RESEND_API_KEY;
+  const to = process.env.NOTIFY_EMAIL;
+  if (!apiKey || !to) return;
+  const label = DECISION_MAIL_LABELS[decisionInfo.statut] || decisionInfo.statut;
+  const lignes = contrats.map((c) => {
+    const it = findItemByContrat(c);
+    return '- ' + c + (it ? ' : ' + (it.interimaire || '—') + ' (' + (it.chantier || '—') + ', ' + (it.conducteur || '—') + ')' : '');
+  });
+  const texte = [
+    contrats.length + ' contrats : ' + label + ' en une fois, le ' + decisionInfo.valideLe,
+    decisionInfo.commentaire ? 'Commentaire : ' + decisionInfo.commentaire : null,
+    '',
+  ].filter((l) => l !== null).concat(lignes).join('\n');
+  try {
+    const resp = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'STAM Contrats <onboarding@resend.dev>',
+        to: [to],
+        subject: contrats.length + ' contrats : ' + label,
+        text: texte,
+      }),
+    });
+    if (!resp.ok) console.error('Resend a refuse le mail groupe :', resp.status, await resp.text());
+  } catch (err) {
+    console.error('Envoi mail groupe echoue :', err && err.message ? err.message : err);
+  }
+}
+
 // ---------------------------------------------------------------------
-// Decision d'un conducteur (valider / refuser / prolonger / arreter /
-// pas encore decide), prise directement sur le site. Pas d'authentification
-// specifique ici : meme niveau de confiance que la page publique elle-meme,
-// qui n'identifie pas nommement qui clique (comme avant, avec les liens
-// personnels par conducteur a venir, cela se fera naturellement).
+// Decision(s) : valider / refuser / prolonger / arreter / pas encore
+// decide. Un seul contrat ({ contrat }) ou plusieurs d'un coup
+// ({ contrats: [...] }, bouton "Tout valider"). Autorise pour RH
+// (identifiant/mot de passe du tableau de bord) ou depuis la page d'un
+// conducteur ({ slug }), et dans ce cas seulement sur ses contrats.
 // ---------------------------------------------------------------------
 app.post('/api/decision', async (req, res) => {
-  const { contrat, decision, commentaire, nouvelleDateFin } = req.body || {};
-  if (!contrat || !decision || !DECISION_LABELS[decision]) {
-    return res.status(400).json({ error: 'corps attendu : { contrat, decision, commentaire?, nouvelleDateFin? }' });
+  const { contrat, contrats, decision, commentaire, nouvelleDateFin, slug } = req.body || {};
+  const liste = Array.isArray(contrats) ? contrats.map(String) : (contrat ? [String(contrat)] : []);
+  if (!liste.length || liste.length > 500 || !decision || !DECISION_LABELS[decision]) {
+    return res.status(400).json({ error: 'corps attendu : { contrat | contrats[], decision, commentaire?, nouvelleDateFin? }' });
   }
   if (decision === 'prolonger' && nouvelleDateFin && !/^\d{2}\/\d{2}\/\d{4}$/.test(nouvelleDateFin)) {
     return res.status(400).json({ error: 'nouvelleDateFin attendue au format JJ/MM/AAAA' });
   }
-  decisions[String(contrat)] = {
+  if (!isRhRequest(req)) {
+    const moi = knownSlug(slug);
+    if (!moi) return res.status(401).json({ error: 'lien invalide' });
+    const autorises = contratsOfSlug(moi);
+    const interdits = liste.filter((c) => !autorises.has(c));
+    if (interdits.length) {
+      return res.status(403).json({ error: 'contrat(s) non attribue(s) a ce conducteur', contrats: interdits });
+    }
+  }
+  const info = {
     statut: DECISION_LABELS[decision],
-    commentaire: commentaire && String(commentaire).trim() ? String(commentaire).trim() : null,
+    commentaire: commentaire && String(commentaire).trim() ? String(commentaire).trim().slice(0, 2000) : null,
     valideLe: todayFR(),
     nouvelleDateFin: decision === 'prolonger' ? (nouvelleDateFin || null) : undefined,
   };
+  liste.forEach((c) => { decisions[c] = Object.assign({}, info); });
   writeJsonSafe(DECISIONS_FILE, decisions);
   const kvResult = await kvSet(KV_KEYS.decisions, decisions);
   rebuildServed();
-  sendDecisionEmail(contrat, decisions[String(contrat)]);
-  res.json({ ok: true, upstash: kvResult });
+  if (liste.length === 1) sendDecisionEmail(liste[0], info);
+  else sendBulkDecisionEmail(liste, info);
+  res.json({ ok: true, nombre: liste.length, upstash: kvResult });
 });
 
 // ---------------------------------------------------------------------
@@ -489,7 +574,7 @@ app.get('/api/conducteurs', requireRhAuth, (req, res) => {
   // construire le lien personnel /c/<slug> de chaque conducteur, demande
   // explicite de Laura Peyre le 15/10/2026.
   const list = Object.keys(seen)
-    .map((nom) => ({ nom, mail: seen[nom], slug: slugify(nom) }))
+    .map((nom) => ({ nom, mail: seen[nom], slug: slugify(nom), lien: linkPath(slugify(nom)) }))
     .sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
   res.json({ conducteurs: list });
 });

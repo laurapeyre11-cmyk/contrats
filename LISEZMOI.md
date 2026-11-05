@@ -125,12 +125,30 @@ réveil — comme avant cette étape.
 
 ## Étape 7 — Lien personnel de chaque conducteur
 
-Chaque conducteur a maintenant son propre lien, du type
-`https://contrats.onrender.com/c/jean-dupont` : il atterrit directement sur
-SES contrats (à valider, échéances, historique), sans jamais voir ceux des
-autres. Pour récupérer ces liens : ouvre `/dashboard` → onglet
-**"Liens conducteurs"** → bouton **Copier** sur chaque ligne. À toi de les
-transmettre (SMS, en main propre, etc. — comme tu préfères).
+Chaque conducteur a son propre lien, du type
+`https://contrats.onrender.com/c/jean-dupont` : il atterrit directement
+sur SES contrats (à valider, fins proches, historique), sans voir ceux des
+autres, et ne peut valider ou refuser que ses propres contrats. La liste
+complète de tous les contrats reste réservée au tableau de bord RH.
+
+Pour récupérer ces liens : ouvre `/dashboard` → onglet **"Liens
+conducteurs"** → bouton **Copier** sur chaque ligne. À toi de les
+transmettre (SMS, en main propre, etc.).
+
+### Ce que voit le conducteur
+
+- **Filtres** : chantier, poste, mois de fin de contrat (et agence s'il y
+  en a plusieurs), plus une recherche par nom. Ils marchent sur les trois
+  onglets.
+- **Valider** : un seul appui. Un bandeau « Annuler » reste quelques
+  secondes en cas d'erreur.
+- **Refuser** : demande un motif.
+- **Tout valider** : valide d'un coup tous les contrats affichés (par
+  exemple tout un chantier après avoir choisi le filtre), avec une
+  confirmation avant.
+- **Fins proches** : prolonger (avec la nouvelle date) ou arrêter.
+- **Historique** : chaque décision peut être annulée (« Annuler cette
+  décision »).
 
 ## Étape 8 — Mail à chaque décision (optionnel)
 
