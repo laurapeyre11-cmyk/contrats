@@ -4,14 +4,14 @@
 // fichiers a la racine du depot, pas de sous-dossiers) pour que le depot
 // GitHub reste facile a mettre a jour a la main depuis l'interface web :
 //  - GET /            page d'accueil (invite a utiliser son lien personnel).
-//  - GET /c/<slug>/<code> : page personnelle d'un conducteur (lien secret,
-//    voir linkToken). Ses donnees viennent de GET /api/moi/<slug>/<code>.
+//  - GET /c/<slug>   page personnelle d'un conducteur. Ses donnees viennent
+//    de GET /api/moi/<slug> (uniquement ses contrats).
 //  - GET /dashboard (+ /api/dashboard.json) : page PRIVEE RH, avec montants,
 //    protegee par une authentification HTTP Basic (identifiant/mot de passe
 //    definis uniquement via des variables d'environnement Render, jamais
 //    dans ce code source).
 //  - GET /api/data.json (RH) : toutes les donnees de la page conducteurs.
-//  - POST /api/decision : un conducteur (avec son lien secret) ou RH
+//  - POST /api/decision : un conducteur (depuis sa page) ou RH
 //    valide/refuse/prolonge/arrete un ou plusieurs contrats. Enregistre sur disque
 //    (decisions.json) et applique immediatement, sans e-mail ni copier-coller.
 //  - GET /api/conducteurs (RH) + POST /api/reassign (RH) : attribuer ou
@@ -361,31 +361,19 @@ function requireRhAuth(req, res, next) {
 }
 
 // ---------------------------------------------------------------------
-// Liens personnels securises (05/11/2026). Avant, le lien d'un conducteur
-// etait /c/<prenom-nom> : facile a deviner, et /api/data.json renvoyait
-// TOUS les contrats (salaires compris) a n'importe qui. Desormais chaque
-// lien contient un code secret calcule a partir de LINK_SECRET (ou, a
-// defaut, REFRESH_SECRET) : /c/<slug>/<code>. Sans le bon code, aucune
-// donnee n'est renvoyee, et un conducteur ne peut lire et decider QUE sur
-// ses propres contrats. Changer LINK_SECRET change tous les liens.
+// Lien personnel de chaque conducteur : /c/<slug>. La page ne recoit que
+// les contrats de CE conducteur (GET /api/moi/<slug>), et il ne peut
+// decider que sur ses propres contrats. Les donnees de tout le monde
+// (/api/data.json) restent reservees a RH.
 // ---------------------------------------------------------------------
-const LINK_SECRET = process.env.LINK_SECRET || process.env.REFRESH_SECRET || (() => {
-  console.warn('Ni LINK_SECRET ni REFRESH_SECRET definis : les liens conducteurs changeront a chaque redemarrage.');
-  return crypto.randomBytes(32).toString('hex');
-})();
-
-function linkToken(slug) {
-  return crypto.createHmac('sha256', LINK_SECRET).update('conducteur:' + slug).digest('base64url').slice(0, 20);
-}
-
 function linkPath(slug) {
-  return '/c/' + encodeURIComponent(slug) + '/' + linkToken(slug);
+  return '/c/' + encodeURIComponent(slug);
 }
 
-function slugFromLink(slug, token) {
-  if (!slug || !token) return null;
-  if (!served.data.conducteurs[slug] && !served.data.echeances[slug]) return null;
-  return timingSafeEqual(String(token), linkToken(String(slug))) ? String(slug) : null;
+function knownSlug(slug) {
+  if (!slug) return null;
+  slug = String(slug);
+  return (served.data.conducteurs[slug] || served.data.echeances[slug]) ? slug : null;
 }
 
 function contratsOfSlug(slug) {
@@ -410,7 +398,7 @@ app.get('/', (req, res) => {
 // script cote client lit le slug dans l'URL et affiche directement le bon
 // conducteur, sans exposer les noms des autres. La liste de ces liens est
 // disponible dans le tableau de bord RH (authentifie).
-app.get(['/c/:slug', '/c/:slug/:token'], (req, res) => {
+app.get(['/c/:slug', '/c/:slug/:ancienCode'], (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
@@ -424,9 +412,9 @@ app.get('/dashboard', requireRhAuth, (req, res) => {
 // Toutes les donnees : reserve a RH (contient les contrats de tout le monde).
 app.get('/api/data.json', requireRhAuth, (req, res) => res.json(served.data));
 
-// Donnees d'UN conducteur, uniquement avec son lien secret.
-app.get('/api/moi/:slug/:token', (req, res) => {
-  const slug = slugFromLink(req.params.slug, req.params.token);
+// Donnees d'UN conducteur (sa page personnelle).
+app.get('/api/moi/:slug', (req, res) => {
+  const slug = knownSlug(req.params.slug);
   if (!slug) return res.status(404).json({ error: 'lien invalide' });
   const c = served.data.conducteurs[slug] || { nom: '', items: [] };
   const e = served.data.echeances[slug] || { chantiers: [] };
@@ -535,12 +523,11 @@ async function sendBulkDecisionEmail(contrats, decisionInfo) {
 // Decision(s) : valider / refuser / prolonger / arreter / pas encore
 // decide. Un seul contrat ({ contrat }) ou plusieurs d'un coup
 // ({ contrats: [...] }, bouton "Tout valider"). Autorise pour RH
-// (identifiant/mot de passe du tableau de bord) ou pour un conducteur
-// muni de son lien secret ({ slug, token }), et dans ce cas seulement sur
-// les contrats qui lui sont attribues.
+// (identifiant/mot de passe du tableau de bord) ou depuis la page d'un
+// conducteur ({ slug }), et dans ce cas seulement sur ses contrats.
 // ---------------------------------------------------------------------
 app.post('/api/decision', async (req, res) => {
-  const { contrat, contrats, decision, commentaire, nouvelleDateFin, slug, token } = req.body || {};
+  const { contrat, contrats, decision, commentaire, nouvelleDateFin, slug } = req.body || {};
   const liste = Array.isArray(contrats) ? contrats.map(String) : (contrat ? [String(contrat)] : []);
   if (!liste.length || liste.length > 500 || !decision || !DECISION_LABELS[decision]) {
     return res.status(400).json({ error: 'corps attendu : { contrat | contrats[], decision, commentaire?, nouvelleDateFin? }' });
@@ -549,7 +536,7 @@ app.post('/api/decision', async (req, res) => {
     return res.status(400).json({ error: 'nouvelleDateFin attendue au format JJ/MM/AAAA' });
   }
   if (!isRhRequest(req)) {
-    const moi = slugFromLink(slug, token);
+    const moi = knownSlug(slug);
     if (!moi) return res.status(401).json({ error: 'lien invalide' });
     const autorises = contratsOfSlug(moi);
     const interdits = liste.filter((c) => !autorises.has(c));

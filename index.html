@@ -314,7 +314,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
   var STATUT_CLS = { valide:'ok', refuse:'bad', prolonge:'ok', arrete:'bad' };
 
   /* ---------- etat ---------- */
-  var SLUG = null, TOKEN = null;
+  var SLUG = null;
   var pending = [], echeances = [];   // objets contrat
   var byContrat = {};                 // contrat -> [objets] (un contrat peut être dans les deux listes)
   var tab = 'pending';
@@ -399,7 +399,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     return fetch('/api/decision', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(Object.assign({ contrats: contrats, decision: decision, slug: SLUG, token: TOKEN }, extra || {}))
+      body: JSON.stringify(Object.assign({ contrats: contrats, decision: decision, slug: SLUG }, extra || {}))
     }).then(function(r){
       if (r.status === 401 || r.status === 403) throw new Error('acces');
       if (!r.ok) throw new Error('http');
@@ -420,7 +420,7 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
   }
   function errorText(e){
     return e && e.message === 'acces'
-      ? "Ce contrat ne vous est plus attribué, ou votre lien a changé. Rechargez la page ou contactez le service RH."
+      ? "Ce contrat ne vous est plus attribué. Rechargez la page ou contactez le service RH."
       : "Pas de connexion ? L'enregistrement a échoué, réessayez.";
   }
 
@@ -698,13 +698,9 @@ details.more .facts{margin-top:6px; border-top:none; padding-top:0}
     showMessage('Lien personnel requis', "Cette page affiche les contrats d'un conducteur via son lien personnel. Si vous n'avez pas reçu le vôtre, contactez le service RH.");
     return;
   }
-  if (!m[2]){
-    showMessage('Ce lien a changé', "Pour protéger les informations des contrats, les liens personnels ont été renouvelés. Demandez votre nouveau lien au service RH.");
-    return;
-  }
-  SLUG = decodeURIComponent(m[1]); TOKEN = m[2];
+  SLUG = decodeURIComponent(m[1]);
 
-  fetch('/api/moi/' + encodeURIComponent(SLUG) + '/' + encodeURIComponent(TOKEN), { cache: 'no-store' }).then(function(r){
+  fetch('/api/moi/' + encodeURIComponent(SLUG), { cache: 'no-store' }).then(function(r){
     if (r.status === 404) throw new Error('lien');
     if (!r.ok) throw new Error('http');
     return r.json();
