@@ -32,6 +32,10 @@
 // deploye sur Render, il continue de fonctionner (avec les dernieres
 // donnees recues) meme si la source qui appelle /api/refresh s'arrete.
 
+// Heure de Paris pour toutes les dates (date du jour, fins proches, etc.) :
+// sur Render, le serveur est en UTC.
+process.env.TZ = process.env.TZ || 'Europe/Paris';
+
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -255,7 +259,8 @@ function recomputeApercu(data, dashboard) {
     const g = data.conducteurs[slug];
     const c = { nom: g.nom, enAttente: 0, valides: 0, refuses: 0 };
     (g.items || []).forEach((it) => {
-      if (it.statut === 'valide') c.valides++;
+      // prolonger ou arreter un contrat vaut validation
+      if (it.statut === 'valide' || it.statut === 'prolonge' || it.statut === 'arrete') c.valides++;
       else if (it.statut === 'refuse') c.refuses++;
       else c.enAttente++;
     });
@@ -270,7 +275,9 @@ function applyAssignmentsOverlay(data, dashboard) {
     const a = assignments[item.contrat];
     if (!a) return;
     item.conducteur = a.conducteur;
+    // l'adresse suit le conducteur : jamais celle de l'ancien
     if (a.conducteurMail) item.conducteurMail = a.conducteurMail;
+    else delete item.conducteurMail;
   }
   forEachFlatItem(dashboard, patchFlat);
 
@@ -282,13 +289,69 @@ function applyAssignmentsOverlay(data, dashboard) {
       if (item.contrat === contrat) {
         item.conducteur = a.conducteur;
         if (a.conducteurMail) item.conducteurMail = a.conducteurMail;
+        else delete item.conducteurMail;
       }
     });
     moveItemToSlug(data.conducteurs, contrat, targetSlug, a.conducteur, false);
     moveItemToSlug(data.echeances, contrat, targetSlug, a.conducteur, true);
   });
+}
 
-  recomputeApercu(data, dashboard);
+// ---------------------------------------------------------------------
+// "Fins proches" recalculees chaque jour a partir des contrats (et non
+// figees au moment de l'import) : contrats qui finissent dans les 30 jours,
+// plus ceux finis depuis moins de 7 jours sans decision (« Depassee »).
+// ---------------------------------------------------------------------
+const ECHEANCE_JOURS_AVANT = 30;
+const ECHEANCE_JOURS_APRES = 7;
+
+function joursJusqua(fr) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(fr || '');
+  if (!m) return null;
+  const fin = new Date(+m[3], +m[2] - 1, +m[1]);
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  return Math.round((fin - t) / 86400000);
+}
+
+const CHAMPS_ECHEANCE = ['contrat', 'interimaire', 'qualification', 'agence', 'chantier', 'conducteur',
+  'debutMission', 'finFerme', 'finSouplesse', 'thm42', 'thm39', 'statut', 'commentaire', 'valideLe', 'nouvelleDateFin'];
+
+function versEcheance(it, j, enPlus) {
+  const e = {};
+  CHAMPS_ECHEANCE.concat(enPlus || []).forEach((k) => { if (it[k] !== undefined) e[k] = it[k]; });
+  e.joursRestants = j;
+  e.enRetard = j < 0;
+  return e;
+}
+
+function dansFenetre(it) {
+  const j = joursJusqua(it.finFerme);
+  if (j == null || j > ECHEANCE_JOURS_AVANT || j < -ECHEANCE_JOURS_APRES) return null;
+  // un contrat fini depuis quelques jours ne reste que s'il n'a pas de decision de fin
+  if (j < 0 && (it.statut === 'prolonge' || it.statut === 'arrete' || it.statut === 'refuse')) return null;
+  return j;
+}
+
+function recomputeEcheances(data, dashboard) {
+  data.echeances = {};
+  Object.keys(data.conducteurs || {}).forEach((slug) => {
+    const c = data.conducteurs[slug];
+    (c.items || []).forEach((it) => {
+      const j = dansFenetre(it);
+      if (j == null) return;
+      if (!data.echeances[slug]) data.echeances[slug] = { nom: c.nom, chantiers: [] };
+      const ch = it.chantier || '—';
+      let g = data.echeances[slug].chantiers.find((x) => x.chantier === ch);
+      if (!g) { g = { chantier: ch, items: [] }; data.echeances[slug].chantiers.push(g); }
+      g.items.push(versEcheance(it, j));
+    });
+  });
+  dashboard.echeances = [];
+  (dashboard.items || []).forEach((it) => {
+    const j = dansFenetre(it);
+    if (j != null) dashboard.echeances.push(versEcheance(it, j, ['conducteurMail', 'salaire', 'tarifFacture']));
+  });
+  dashboard.echeances.sort((a, b) => a.joursRestants - b.joursRestants);
 }
 
 function buildServed() {
@@ -296,13 +359,21 @@ function buildServed() {
   const dashboard = JSON.parse(JSON.stringify(rawDashboard));
   applyAssignmentsOverlay(data, dashboard);
   applyDecisionsOverlay(data, dashboard);
-  return { data, dashboard };
+  recomputeEcheances(data, dashboard);
+  recomputeApercu(data, dashboard); // apres les decisions, pour des compteurs justes
+  return { data, dashboard, jour: todayFR() };
 }
 
 let served = buildServed();
 
 function rebuildServed() {
   served = buildServed();
+}
+
+// les "fins proches" et jours restants changent a minuit
+function servedDuJour() {
+  if (served.jour !== todayFR()) rebuildServed();
+  return served;
 }
 
 // STAM V6 - CORS : le fichier "pousser_donnees.html" que RH ouvre en local
@@ -447,23 +518,25 @@ app.get('/dashboard', requireRhAuth, (req, res) => {
 // Donnees
 // ---------------------------------------------------------------------
 // Toutes les donnees : reserve a RH (contient les contrats de tout le monde).
-app.get('/api/data.json', requireRhAuth, (req, res) => res.json(served.data));
+app.get('/api/data.json', requireRhAuth, (req, res) => res.json(servedDuJour().data));
 
 // Donnees d'UN conducteur (sa page personnelle).
 app.get('/api/moi/:code', (req, res) => {
   if (tropDEssais(req)) return res.status(429).json({ error: 'trop d\'essais, reessayez dans 15 minutes' });
   const slug = slugFromCode(req.params.code);
   if (!slug) { noterEssaiRate(req); return res.status(404).json({ error: 'lien invalide' }); }
-  const c = served.data.conducteurs[slug] || { nom: '', items: [] };
-  const e = served.data.echeances[slug] || { chantiers: [] };
+  const d = servedDuJour().data;
+  const c = d.conducteurs[slug] || { nom: '', items: [] };
+  const e = d.echeances[slug] || { chantiers: [] };
   res.set('Cache-Control', 'no-store');
-  res.json({ genereLe: served.data.genereLe, slug, nom: c.nom || e.nom || '', items: c.items || [], echeances: e.chantiers || [] });
+  res.json({ genereLe: d.genereLe, genereA: d.genereA || null, slug, nom: c.nom || e.nom || '', items: c.items || [], echeances: e.chantiers || [] });
 });
-app.get('/api/dashboard.json', requireRhAuth, (req, res) => res.json(served.dashboard));
+app.get('/api/dashboard.json', requireRhAuth, (req, res) => res.json(servedDuJour().dashboard));
 
 app.get('/api/health', (req, res) => res.json({
   ok: true,
   dernierRafraichissement: served.data.genereLe,
+  heure: served.data.genereA || null,
 }));
 
 // ---------------------------------------------------------------------
@@ -565,14 +638,22 @@ async function sendBulkDecisionEmail(contrats, decisionInfo) {
 // conducteur ({ lien: <code> }), et dans ce cas seulement sur ses contrats.
 // ---------------------------------------------------------------------
 app.post('/api/decision', async (req, res) => {
-  const { contrat, contrats, decision, commentaire, nouvelleDateFin, lien } = req.body || {};
-  const liste = Array.isArray(contrats) ? contrats.map(String) : (contrat ? [String(contrat)] : []);
-  if (!liste.length || liste.length > 500 || !decision || !DECISION_LABELS[decision]) {
+  const { contrat, contrats, decision, commentaire, nouvelleDateFin, lien, ignorerNonAttribues } = req.body || {};
+  let liste = Array.isArray(contrats) ? contrats.map(String) : (contrat ? [String(contrat)] : []);
+  if (!liste.length || liste.length > 500 || typeof decision !== 'string' || !Object.prototype.hasOwnProperty.call(DECISION_LABELS, decision)) {
     return res.status(400).json({ error: 'corps attendu : { contrat | contrats[], decision, commentaire?, nouvelleDateFin? }' });
   }
-  if (decision === 'prolonger' && nouvelleDateFin && !/^\d{2}\/\d{2}\/\d{4}$/.test(nouvelleDateFin)) {
-    return res.status(400).json({ error: 'nouvelleDateFin attendue au format JJ/MM/AAAA' });
+  if (decision === 'prolonger') {
+    const j = joursJusqua(dateValide(nouvelleDateFin));
+    if (j == null) return res.status(400).json({ error: 'nouvelleDateFin attendue au format JJ/MM/AAAA (date réelle)' });
+    const tropTot = liste.filter((c) => {
+      const it = findItemByContrat(c);
+      const fin = it ? joursJusqua(it.finFerme) : null;
+      return j <= (fin == null ? -1 : fin) || j < 0;
+    });
+    if (tropTot.length) return res.status(400).json({ error: 'la nouvelle date de fin doit être après la fin actuelle du contrat', contrats: tropTot });
   }
+  let ignores = [];
   if (!isRhRequest(req)) {
     if (tropDEssais(req)) return res.status(429).json({ error: 'trop d\'essais' });
     const moi = slugFromCode(lien);
@@ -580,14 +661,19 @@ app.post('/api/decision', async (req, res) => {
     const autorises = contratsOfSlug(moi);
     const interdits = liste.filter((c) => !autorises.has(c));
     if (interdits.length) {
-      return res.status(403).json({ error: 'contrat(s) non attribue(s) a ce conducteur', contrats: interdits });
+      // "Tout valider" : on valide ceux qui sont encore a lui, on signale les autres
+      if (!ignorerNonAttribues || interdits.length === liste.length) {
+        return res.status(403).json({ error: 'contrat(s) non attribue(s) a ce conducteur', contrats: interdits });
+      }
+      ignores = interdits;
+      liste = liste.filter((c) => autorises.has(c));
     }
   }
   const info = {
     statut: DECISION_LABELS[decision],
     commentaire: commentaire && String(commentaire).trim() ? String(commentaire).trim().slice(0, 2000) : null,
     valideLe: todayFR(),
-    nouvelleDateFin: decision === 'prolonger' ? (nouvelleDateFin || null) : undefined,
+    nouvelleDateFin: decision === 'prolonger' ? nouvelleDateFin : undefined,
   };
   liste.forEach((c) => { decisions[c] = Object.assign({}, info); });
   writeJsonSafe(DECISIONS_FILE, decisions);
@@ -595,8 +681,16 @@ app.post('/api/decision', async (req, res) => {
   rebuildServed();
   if (liste.length === 1) sendDecisionEmail(liste[0], info);
   else sendBulkDecisionEmail(liste, info);
-  res.json({ ok: true, nombre: liste.length, upstash: kvResult });
+  res.json({ ok: true, nombre: liste.length, ignores, upstash: kvResult });
 });
+
+// "JJ/MM/AAAA" si c'est une vraie date (pas le 31/11), sinon null
+function dateValide(s) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(s || ''));
+  if (!m) return null;
+  const d = new Date(+m[3], +m[2] - 1, +m[1]);
+  return d.getFullYear() === +m[3] && d.getMonth() === +m[2] - 1 && d.getDate() === +m[1] ? s : null;
+}
 
 // ---------------------------------------------------------------------
 // Attribution / reattribution du conducteur responsable d'un contrat
@@ -620,9 +714,10 @@ app.get('/api/conducteurs', requireRhAuth, (req, res) => {
 
 app.post('/api/reassign', requireRhAuth, async (req, res) => {
   const { contrat, conducteur, conducteurMail } = req.body || {};
-  if (!contrat || !conducteur) {
+  if (!contrat || !conducteur || !String(conducteur).trim()) {
     return res.status(400).json({ error: 'corps attendu : { contrat, conducteur, conducteurMail? }' });
   }
+  if (!findItemByContrat(contrat)) return res.status(404).json({ error: 'contrat inconnu' });
   assignments[String(contrat)] = { conducteur: String(conducteur).trim(), conducteurMail: conducteurMail ? String(conducteurMail).trim() : null };
   writeJsonSafe(ASSIGNMENTS_FILE, assignments);
   const kvResult = await kvSet(KV_KEYS.assignments, assignments);
@@ -724,7 +819,9 @@ app.post('/api/import-excel', async (req, res) => {
   const nbAttente = Object.values(served.data.conducteurs).reduce((n, c) => n + c.items.filter((it) => !it.statut || it.statut === 'attente').length, 0);
   let aEnvoyer = null;
   if (req.body.mails) {
-    const mailsConducteurs = {};
+    // adresse de chaque conducteur : CONDUCTEURS.xlsx, puis celle saisie lors
+    // d'une reattribution
+    const mailsConducteurs = Object.assign({}, resultat.mails || {});
     (served.dashboard.items || []).forEach((it) => {
       if (it.conducteurMail) mailsConducteurs[slugImport(it.conducteur)] = it.conducteurMail;
     });
@@ -746,6 +843,9 @@ app.post('/api/import-excel', async (req, res) => {
     mails: aEnvoyer ? aEnvoyer.mails : undefined,
     connus: aEnvoyer ? aEnvoyer.connus : undefined,
     message: resultat.nombre + ' contrats envoyés, dont ' + nbAttente + ' à valider.' +
+      (resultat.ignorees && resultat.ignorees.length
+        ? ' ' + resultat.ignorees.length + ' ligne(s) ignorée(s) car il manque le n° de contrat ou le nom de l\'intérimaire (ligne ' + resultat.ignorees.slice(0, 10).join(', ') + (resultat.ignorees.length > 10 ? '…' : '') + ').'
+        : '') +
       (resume.ok ? '' : ' ATTENTION : la sauvegarde Upstash a échoué, les données seront perdues à la prochaine mise en veille du site.'),
     upstash: resume,
   });
@@ -807,6 +907,14 @@ app.get('/api/kv-status', async (req, res) => {
 // une mise en veille Render) avant d'ouvrir le port, pour ne jamais servir
 // une page vide par erreur a une premiere requete suivant un reveil.
 // ---------------------------------------------------------------------
+// Erreurs (ex. corps JSON illisible) : reponse JSON courte, jamais la pile
+// d'appels ni les chemins du serveur.
+app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
+  console.error('Erreur requete', req.method, req.path, err && err.message);
+  const statut = err && err.status && err.status < 500 ? err.status : 500;
+  res.status(statut).json({ error: statut === 500 ? 'erreur interne' : 'requête invalide' });
+});
+
 async function loadFromUpstashAtBoot() {
   if (!upstashEnabled()) {
     console.log('Upstash non configure : persistance disque uniquement (perdue a chaque mise en veille Render).');

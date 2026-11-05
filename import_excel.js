@@ -14,7 +14,6 @@
 
 const ExcelJS = require('exceljs');
 
-const ECHEANCE_JOURS = 30; // "Fins proches" : contrats qui finissent dans les 30 jours
 
 // Libelles d'en-tete (sans accents, en minuscules) -> champ
 const COLONNES = [
@@ -78,11 +77,24 @@ function dateFR(v) {
     const d = new Date(Math.round((v - 25569) * 86400000));
     return dateFR(d);
   }
-  // "31/08/2026" ou "31/08/26" (le moteur ecrit parfois l'annee sur 2 chiffres)
-  const m = /(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})(?!\d)/.exec(String(v));
-  if (m) return pad(m[1]) + '/' + pad(m[2]) + '/' + (m[3].length === 2 ? '20' + m[3] : m[3]);
+  // "31/08/2026", "31/08/26" (annee sur 2 chiffres), "31.08.2026", "31-08-2026"
+  const m = /(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})(?!\d)/.exec(String(v));
+  if (m) return dateReelle(+m[1], +m[2], m[3].length === 2 ? 2000 + +m[3] : +m[3]);
   const iso = /(\d{4})-(\d{2})-(\d{2})/.exec(String(v));
-  return iso ? iso[3] + '/' + iso[2] + '/' + iso[1] : null;
+  return iso ? dateReelle(+iso[3], +iso[2], +iso[1]) : null;
+}
+
+// null pour une date qui n'existe pas (ex. 31/11)
+function dateReelle(j, m, a) {
+  const d = new Date(Date.UTC(a, m - 1, j));
+  if (d.getUTCFullYear() !== a || d.getUTCMonth() !== m - 1 || d.getUTCDate() !== j) return null;
+  return pad(j) + '/' + pad(m) + '/' + a;
+}
+
+// "HUMANYS Interim et Insertion AVENANT 121764-01" -> "HUMANYS Interim et Insertion"
+function agencePropre(a) {
+  if (!a) return a;
+  return a.replace(/\s+(CONTRAT|AVENANT)\b.*$/i, '').trim() || a;
 }
 
 function nombre(v) {
@@ -116,7 +128,11 @@ function statutDepuisExcel(v) {
 
 async function lireClasseur(buf) {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buf);
+  try {
+    await wb.xlsx.load(buf);
+  } catch (e) {
+    throw new Error('le fichier n\'est pas un classeur Excel lisible (.xlsx)');
+  }
   return wb;
 }
 
@@ -150,7 +166,7 @@ async function construireDepuisExcel(validationBuf, conducteursBuf, options = {}
   const maintenant = options.maintenant || new Date();
   const wb = await lireClasseur(validationBuf);
   const ws = wb.getWorksheet('A valider') || wb.worksheets.find((w) => w.state !== 'hidden') || wb.worksheets[0];
-  if (!ws) throw new Error('onglet « A valider » introuvable');
+  if (!ws) throw new Error('onglet « A valider » introuvable dans VALIDATION_CONTRATS.xlsx');
 
   // reperage des colonnes par en-tete
   const entetes = (ws.getRow(1).values || []).map((v) => sansAccent(texte(v)));
@@ -160,19 +176,23 @@ async function construireDepuisExcel(validationBuf, conducteursBuf, options = {}
     col[champ] = i > 0 ? i : positionParDefaut + 1; // exceljs : colonnes numerotees a partir de 1
   });
   if (!entetes.some((h) => h && h.startsWith('n') && h.includes('contrat'))) {
-    throw new Error('en-tete « N. contrat » introuvable en ligne 1 de l\'onglet « A valider »');
+    throw new Error('en-tête « N. contrat » introuvable en ligne 1 de l\'onglet « A valider »');
   }
 
   const mails = await lireMails(conducteursBuf, corrections);
   const nomsCanon = {}; // slug -> nom affiche
-  const parContrat = new Map(); // un contrat present plusieurs fois : la derniere ligne gagne
+  const lignes = [];
+  const ignorees = []; // lignes avec un n° ou un nom, mais pas les deux
 
   ws.eachRow((row, n) => {
     if (n === 1) return;
     const v = (champ) => row.getCell(col[champ]).value;
     const contrat = texte(v('contrat'));
     const interimaire = texte(v('interimaire'));
-    if (!contrat || !interimaire) return;
+    if (!contrat || !interimaire) {
+      if (contrat || interimaire) ignorees.push(n);
+      return;
+    }
     let conducteur = texte(v('conducteur')) || 'rh';
     if (corrections[slugify(conducteur)]) conducteur = corrections[slugify(conducteur)];
     const slug = slugify(conducteur);
@@ -185,13 +205,13 @@ async function construireDepuisExcel(validationBuf, conducteursBuf, options = {}
     let thm39 = nombre(v('thm39'));
     if (thm42 == null && mtt42 != null) thm42 = Math.round((mtt42 / 42) * 100) / 100;
     if (thm39 == null && mtt39 != null) thm39 = Math.round((mtt39 / 39) * 100) / 100;
-    parContrat.set(contrat, {
+    lignes.push({
       slug,
       fichier: texte(v('fichier')),
       item: {
         contrat,
         interimaire,
-        agence: texte(v('agence')),
+        agence: agencePropre(texte(v('agence'))),
         chantier: texte(v('chantier')),
         conducteur, // remplace par le nom canonique plus bas
         qualification: texte(v('qualification')),
@@ -211,11 +231,32 @@ async function construireDepuisExcel(validationBuf, conducteursBuf, options = {}
     });
   });
 
-  const genereLe = pad(maintenant.getDate()) + '/' + pad(maintenant.getMonth() + 1) + '/' + maintenant.getFullYear();
-  const aujourdhui = Date.UTC(maintenant.getFullYear(), maintenant.getMonth(), maintenant.getDate());
+  // Un meme n° de contrat peut revenir :
+  //  - meme debut de mission -> doublon : la derniere ligne gagne ;
+  //  - debuts differents (n° reutilise par l'agence pour une nouvelle
+  //    mission) -> les deux sont gardees ; les plus anciennes recoivent
+  //    « (début JJ/MM/AAAA) » apres le n°, la plus recente garde le n° seul.
+  const parN = new Map();
+  lignes.forEach((l) => {
+    if (!parN.has(l.item.contrat)) parN.set(l.item.contrat, new Map());
+    parN.get(l.item.contrat).set(l.item.debutMission || '', l);
+  });
+  const parContrat = new Map();
+  for (const [n, parDebut] of parN) {
+    const versions = Array.from(parDebut.values())
+      .sort((a, b) => (jourUTC(a.item.debutMission) || 0) - (jourUTC(b.item.debutMission) || 0));
+    versions.forEach((l, i) => {
+      if (i < versions.length - 1) l.item.contrat = n + ' (début ' + (l.item.debutMission || '?') + ')';
+      parContrat.set(l.item.contrat, l);
+    });
+  }
 
-  const data = { genereLe, conducteurs: {}, echeances: {}, apercu: [], historique: [] };
-  const dashboard = { genereLe, items: [], echeances: [], apercu: [] };
+  const genereLe = pad(maintenant.getDate()) + '/' + pad(maintenant.getMonth() + 1) + '/' + maintenant.getFullYear();
+  const genereA = pad(maintenant.getHours()) + 'h' + pad(maintenant.getMinutes());
+
+  // les "fins proches" sont calculees par le serveur, chaque jour
+  const data = { genereLe, genereA, conducteurs: {}, echeances: {}, apercu: [], historique: [] };
+  const dashboard = { genereLe, genereA, items: [], echeances: [], apercu: [] };
 
   const fichiers = {}; // n° de contrat -> nom du PDF signe (pieces jointes des mails)
   for (const { slug, item, fichier } of parContrat.values()) {
@@ -227,29 +268,9 @@ async function construireDepuisExcel(validationBuf, conducteursBuf, options = {}
     if (!data.conducteurs[slug]) data.conducteurs[slug] = { nom, items: [] };
     data.conducteurs[slug].items.push(Object.assign({}, item));
     dashboard.items.push(Object.assign({}, item, mail ? { conducteurMail: mail } : {}));
-
-    const fin = jourUTC(item.finFerme);
-    if (fin != null) {
-      const jours = Math.round((fin - aujourdhui) / 86400000);
-      if (jours >= 0 && jours <= ECHEANCE_JOURS) {
-        const ech = {
-          contrat: item.contrat, interimaire: item.interimaire, qualification: item.qualification,
-          agence: item.agence, chantier: item.chantier, conducteur: nom,
-          debutMission: item.debutMission, finFerme: item.finFerme,
-          joursRestants: jours, enRetard: false, thm42: item.thm42, thm39: item.thm39,
-          statut: item.statut, commentaire: item.commentaire, valideLe: item.valideLe,
-        };
-        if (!data.echeances[slug]) data.echeances[slug] = { nom, chantiers: [] };
-        let g = data.echeances[slug].chantiers.find((x) => x.chantier === (item.chantier || '—'));
-        if (!g) { g = { chantier: item.chantier || '—', items: [] }; data.echeances[slug].chantiers.push(g); }
-        g.items.push(ech);
-        dashboard.echeances.push(Object.assign({}, ech, mail ? { conducteurMail: mail } : {},
-          { salaire: item.salaire, tarifFacture: item.tarifFacture }));
-      }
-    }
   }
 
-  return { data, dashboard, fichiers, nombre: parContrat.size };
+  return { data, dashboard, fichiers, mails, ignorees, nombre: parContrat.size };
 }
 
 module.exports = { construireDepuisExcel, slugify };

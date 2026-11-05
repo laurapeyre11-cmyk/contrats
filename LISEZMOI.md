@@ -159,7 +159,12 @@ Ce que fait la mise à jour :
 - une validation saisie dans la colonne S de l'Excel (« Validé » /
   « Refusé ») est reprise si le conducteur n'a rien décidé sur le site ;
 - le THM affiché est le THM 42h calculé par le moteur (MTT 42h / 42) ;
-- « Fins proches » = contrats qui finissent dans les 30 jours ;
+- « Fins proches » = contrats qui finissent dans les 30 jours, plus ceux
+  finis depuis moins de 7 jours sans décision (« Dépassée ») ; recalculé
+  chaque jour ;
+- prolonger ou arrêter un contrat vaut aussi validation ;
+- un même n° de contrat utilisé pour deux missions (débuts différents) :
+  les deux sont gardées, la plus ancienne affichée « n° (début JJ/MM/AAAA) » ;
 - les adresses mail des conducteurs viennent de `CONDUCTEURS.xlsx` ;
 - un conducteur écrit de deux façons (ex. « Aleaxandre » / « Alexandre
   QUEYRAS ») est réuni grâce à la rubrique `_corrections` de `liens.json`.
